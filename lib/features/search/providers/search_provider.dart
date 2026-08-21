@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:meta/meta.dart';
 
 import '../../../models/place_model.dart';
 import '../../../services/geocoding_service.dart';
@@ -47,13 +48,20 @@ class SearchNotifier extends Notifier<SearchState> {
 
   @override
   SearchState build() {
-    _service = GeocodingService();
+    _service = createService();
     ref.onDispose(() {
       _debounceTimer?.cancel();
       _service.dispose();
     });
     return const SearchIdle();
   }
+
+  /// Overridden in tests to inject a fake `GeocodingService` (Phase 15) —
+  /// lets a test exercise this notifier's real debounce/loading/results
+  /// timing (via `fakeAsync`) without a real network call, rather than
+  /// replacing the whole notifier with a fixed-state stand-in.
+  @visibleForTesting
+  GeocodingService createService() => GeocodingService();
 
   void queryChanged(String query) {
     _debounceTimer?.cancel();

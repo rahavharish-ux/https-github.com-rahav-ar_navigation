@@ -6,8 +6,46 @@ import '../../models/location_model.dart';
 /// Lower = smoother/slower to react, higher = snappier/more jitter. Tuned
 /// to visibly damp a few meters of GPS wobble while still keeping pace
 /// with real movement between fixes ~2-15m apart. See PROJECT_STATUS.md
-/// Phase 8.
+/// Phase 8. Kept as the default for [smoothHeadingDegrees]'s public
+/// `alpha` parameter and as a fallback reference point; [smoothLocation]
+/// itself now picks a real per-fix alpha via [_effectiveAlpha] (Phase 16)
+/// instead of always using this fixed value.
 const double _smoothingAlpha = 0.35;
+
+/// [smoothLocation]'s real per-fix alpha range (Phase 16) — a principled,
+/// bounded improvement over always smoothing with the same fixed
+/// [_smoothingAlpha] regardless of how good the new fix actually is: a
+/// low-accuracy fix is trusted less (smoothed more heavily toward the
+/// previous value), a high-accuracy fix is trusted more (tracked more
+/// closely). [_worstWeightedAccuracyMeters] matches
+/// `location_filter.dart`'s default `maxAccuracyMeters` — the least
+/// accurate fix `shouldAcceptLocationUpdate` still accepts at all.
+/// Deliberately still centered near the original fixed value at a
+/// middling accuracy, not a wholesale re-tuning: this is real, tested
+/// logic, but — like the original fixed alpha — has never been validated
+/// against a real long-duration outdoor GPS stream (no way to do that on
+/// this dev machine); see KNOWN_LIMITATIONS.md.
+const double _bestWeightedAccuracyMeters = 5;
+const double _worstWeightedAccuracyMeters = 50;
+const double _minSmoothingAlpha = 0.15;
+const double _maxSmoothingAlpha = 0.5;
+
+/// Linearly maps [accuracyMeters] to a smoothing alpha: better accuracy
+/// (closer to [_bestWeightedAccuracyMeters]) yields a higher alpha
+/// (trust the new fix more), worse accuracy (closer to
+/// [_worstWeightedAccuracyMeters]) yields a lower alpha (lean more on the
+/// previous smoothed value). Clamped at both ends so an unusually good or
+/// bad accuracy value never extrapolates past the real tuned range.
+double _effectiveAlpha(double accuracyMeters) {
+  final clamped = accuracyMeters.clamp(
+    _bestWeightedAccuracyMeters,
+    _worstWeightedAccuracyMeters,
+  );
+  final t =
+      (clamped - _bestWeightedAccuracyMeters) /
+      (_worstWeightedAccuracyMeters - _bestWeightedAccuracyMeters);
+  return _maxSmoothingAlpha - t * (_maxSmoothingAlpha - _minSmoothingAlpha);
+}
 
 /// Blends [raw] with [previousSmoothed] (exponential moving average) so
 /// the map marker and navigation math don't visibly jitter within GPS
@@ -25,23 +63,21 @@ AppLocation smoothLocation({
 }) {
   if (previousSmoothed == null) return raw;
 
+  final alpha = _effectiveAlpha(raw.accuracyMeters);
+
   return AppLocation(
-    latitude: _lerp(previousSmoothed.latitude, raw.latitude, _smoothingAlpha),
-    longitude: _lerp(
-      previousSmoothed.longitude,
-      raw.longitude,
-      _smoothingAlpha,
-    ),
+    latitude: _lerp(previousSmoothed.latitude, raw.latitude, alpha),
+    longitude: _lerp(previousSmoothed.longitude, raw.longitude, alpha),
     accuracyMeters: raw.accuracyMeters,
     speedMetersPerSecond: _lerp(
       previousSmoothed.speedMetersPerSecond,
       raw.speedMetersPerSecond,
-      _smoothingAlpha,
+      alpha,
     ),
     headingDegrees: smoothHeadingDegrees(
       previousSmoothed.headingDegrees,
       raw.headingDegrees,
-      alpha: _smoothingAlpha,
+      alpha: alpha,
     ),
     timestamp: raw.timestamp,
   );

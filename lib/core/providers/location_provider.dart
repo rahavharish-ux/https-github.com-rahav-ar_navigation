@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:meta/meta.dart';
 
 import '../../models/location_model.dart';
 import '../../services/location_service.dart';
@@ -100,12 +101,19 @@ class LocationNotifier extends Notifier<LocationState> {
 
   @override
   LocationState build() {
-    _service = const LocationService();
+    _service = createService();
     ref.onDispose(() {
       _subscription?.cancel();
     });
     return const LocationInitial();
   }
+
+  /// Overridden in tests to inject a fake `LocationService` (Phase 15) —
+  /// lets a test verify the real cancel/resubscribe-on-speed-bucket-change
+  /// wiring (previously untested; see KNOWN_LIMITATIONS.md) without a real
+  /// geolocator platform channel.
+  @visibleForTesting
+  LocationService createService() => const LocationService();
 
   Future<void> requestAndStart() async {
     if (state is LocationRequesting) return;

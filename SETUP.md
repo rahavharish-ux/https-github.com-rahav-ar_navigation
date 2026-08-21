@@ -26,10 +26,69 @@ flutter run
 ## Verification commands
 
 ```bash
-flutter analyze       # static analysis, should report "No issues found!"
-flutter test          # widget tests
-flutter build apk --debug   # Android debug build (no device required)
+flutter analyze              # static analysis, should report "No issues found!"
+flutter test                 # unit/widget tests
+flutter test --coverage      # same, plus coverage/lcov.info (LCOV report)
+flutter build apk --debug    # Android debug build (no device required)
 ```
+
+## Integration testing (real device, since Phase 15)
+
+`integration_test/app_test.dart` runs the real app on a connected
+device/emulator — real platform bindings, real gestures, not the fake
+`flutter_test` environment. Requires a connected device:
+
+```bash
+flutter devices                                    # find your device id
+flutter test integration_test/app_test.dart -d <device-id>
+```
+
+Currently scoped to the boot → splash → onboarding flow only (no GPS/
+camera/network permissions needed) — see KNOWN_LIMITATIONS.md for why
+deeper flows aren't integration-tested yet.
+
+## Release builds (since Phase 16)
+
+```bash
+flutter build apk --release --split-per-abi   # real per-ABI APKs, ~44MB for arm64
+flutter build appbundle --release             # the actual Play Store format
+```
+
+Both build with R8 minification (`android/app/proguard-rules.pro`) and
+are verified working on a real device, and — since Phase 17 — both sign
+with a **real release keystore** rather than the debug one (see
+`android/app/build.gradle.kts`'s release `signingConfig`).
+
+To reproduce real release signing on another machine (the real keystore
+itself is intentionally not committed — see `android/.gitignore`):
+
+1. **Generate a keystore** following
+   [Flutter's official signing docs](https://docs.flutter.dev/deployment/android#sign-the-app),
+   e.g.:
+   ```bash
+   keytool -genkey -v -keystore android/upload-keystore.jks \
+     -storetype JKS -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+   ```
+2. **Create `android/key.properties`** (gitignored) pointing at it:
+   ```
+   storePassword=<your store password>
+   keyPassword=<your key password>
+   keyAlias=upload
+   storeFile=<absolute path to upload-keystore.jks>
+   ```
+   `build.gradle.kts` reads this automatically and falls back to debug
+   signing if the file/keystore don't exist, so a clone without them
+   still builds.
+3. **Get the real SHA-1** for the Google Maps API key restriction below:
+   ```bash
+   keytool -list -v -keystore android/upload-keystore.jks -alias upload
+   ```
+   This project's own real release SHA-1 (Phase 17):
+   `04:40:47:33:6E:64:25:8F:97:33:86:AB:A4:10:49:75:5B:6F:1F:B7`
+
+Add whichever SHA-1 you generate to the Google Maps API key restriction
+below (the debug SHA-1 registered by default won't match a real release
+signature).
 
 ## Google Maps API key (required since Phase 11)
 
@@ -54,9 +113,15 @@ optional, and there is no free fallback.
    Android apps): add this app's package name
    (`com.tnarnav.tn_ar_navigation`) and its debug signing certificate's
    SHA-1 fingerprint (`cd android && ./gradlew signingReport`, look for
-   the `debug` variant). Restricting to just the APIs above (API
-   restrictions) is also recommended. An unrestricted key that leaks is a
-   real liability — this step isn't optional busywork.
+   the `debug` variant) — needed for debug builds. **For real release
+   builds/distribution, also add the release SHA-1** from the "Release
+   builds" section above (`04:40:47:33:6E:64:25:8F:97:33:86:AB:A4:10:49:
+   75:5B:6F:1F:B7` for this project's own real keystore) — a release
+   build signed with a SHA-1 not on this list will fail Maps/Places
+   requests at runtime even though the build itself succeeds. Restricting
+   to just the APIs above (API restrictions) is also recommended. An
+   unrestricted key that leaks is a real liability — this step isn't
+   optional busywork.
 6. **Configure the key in two places** (both are gitignored — never
    commit a real key):
    - `android/local.properties`: add a line

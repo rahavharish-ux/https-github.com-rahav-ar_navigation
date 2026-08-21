@@ -1,6 +1,6 @@
 # Project Status
 
-_Last updated: 2026-08-21 (Phase 14)_
+_Last updated: 2026-08-21 (Phase 17)_
 
 ## Environment
 
@@ -20,7 +20,7 @@ could be visually verified in Chrome on this development machine (no
 Android emulator/device is available here) — it is not a product target
 and can be removed without affecting Android/iOS.
 
-## Overall Status: Phase 14 (Backend/Supabase) complete and verified end-to-end on real hardware against a real Supabase project — sign-up, sign-in, save/list saved places all confirmed working on-device. Three real bugs were found and fixed during this verification pass (see below). History/preferences remain deliberately deferred — entering Phase 15 (expanded testing)
+## Overall Status: Phase 17 (Production build) complete — the 17-phase roadmap is done. A real release-signing keystore was generated and wired in, verified with a real signed release build on-device; Supabase email confirmation was re-enabled and verified end-to-end with a real confirmation email. See KNOWN_LIMITATIONS.md for what real-world distribution still needs (Play Console listing, backend API-key proxying, iOS) before this app could actually ship
 
 This project follows a 17-phase incremental roadmap (see below). No
 feature-specific packages (maps, routing, AR, AI, GPS, camera, sensors,
@@ -45,9 +45,9 @@ time, as their phase begins.
 | 12 | Hybrid localization | **Complete** |
 | 13 | Computer vision | **Complete** (scoped to real on-device OCR + scene labeling; landmark ID and lane detection deferred — see below) |
 | 14 | Backend (Supabase) | **Complete** — auth + saved places built, tested, and verified end-to-end on real hardware against a real Supabase project; history/preferences deferred |
-| 15 | Testing (expanded) | Pending |
-| 16 | Optimization | Pending |
-| 17 | Production build | Pending |
+| 15 | Testing (expanded) | **Complete** — flagged gaps closed, LCOV coverage added, real on-device integration testing added and verified live |
+| 16 | Optimization | **Complete** — release build fixed (was silently broken), APK size cut ~45%, real frame-timing verified good, accuracy-weighted GPS smoothing added |
+| 17 | Production build | **Complete** — real release signing generated and verified; Supabase email confirmation re-enabled and verified end-to-end |
 
 Each phase must end with: app runs, feature tested, analyzer clean,
 Android build verified, docs updated — before the next phase starts.
@@ -1410,8 +1410,317 @@ full live verification pass.
       verified live on the device before moving to the next, not assumed
       fixed from the diff alone
 
+### Phase 15 — Testing, expanded (2026-08-21)
+- [x] **Scope decision, made with the project owner up front**: three
+      real, genuinely different directions were on the table (closing
+      already-flagged unit/widget gaps, adding coverage reporting, and
+      adding real on-device integration testing). The owner chose all
+      three rather than picking one
+- [x] **Closed three specific gaps already named in KNOWN_LIMITATIONS.md**:
+      - `search_provider_test.dart` (new) — timing-precise coverage of
+        the real debounce → loading → results sequence via `fakeAsync`,
+        previously only covered by a non-timing-precise idle/failure
+        widget test. Needed a small testability hook
+        (`SearchNotifier.createService`, `@visibleForTesting`) so a test
+        could inject a fake `GeocodingService` while keeping the real
+        `Timer`-based debounce logic intact — the same "override just the
+        service, keep the real state machine" pattern already used
+        throughout this project's fixed-notifier tests, just for a
+        service dependency instead of a whole notifier this time
+      - `navigation_provider_test.dart` gained a full simulated-drive
+        test — a continuous sequence of GPS fixes walking the entire
+        route from origin through the turn to arrival, rather than only
+        isolated single-update snapshots
+      - `location_provider_test.dart` gained a real resubscribe-on-speed-
+        bucket-change test (`LocationNotifier.createService`, same
+        pattern), confirming the stream cancel/resubscribe wiring
+        actually fires with a wider `distanceFilter` — previously only
+        the pure `speedBucketFor`/`distanceFilterMetersForSpeedBucket`
+        functions were tested, not the notifier wiring that calls them
+      - **Three real test-authoring bugs were caught and fixed while
+        building these** (not app bugs): the search test's fake service
+        needed a real fake-clock-controlled delay, or `fakeAsync.elapse()`
+        resolved the debounce timer *and* the search Future in the same
+        pass, making the intermediate `SearchLoading` state
+        unobservable; the resubscribe test's driving-speed fixture
+        needed a much higher raw speed than the driving threshold itself,
+        because Phase 8's real exponential smoothing (α=0.35) blends a
+        raw speed toward the previous smoothed value before the
+        speed-bucket decision reads it; the full-drive test's assumed
+        "approaching" distance (~22m) was actually inside the real
+        arrival/turning threshold (25m) — closer to the maneuver than
+        intended, so the code correctly advanced past it, which is real,
+        correct behavior the test's own premise had gotten wrong
+      - `dart format .`, `flutter analyze` (No issues found), `flutter
+        test` — all passed, **222/222** (5 new)
+- [x] **Added LCOV coverage reporting**: `coverage` package (dev
+      dependency) + `flutter test --coverage` (the project's own built-in
+      Flutter test runner, not the `coverage` package's
+      `test_with_coverage` script — see the "real gap caught" note below)
+      produces `coverage/lcov.info`. **Current baseline: 73.7% line
+      coverage (1476/2002 lines)**. Lowest-covered files are almost all
+      already-documented, permanent categories: real platform/plugin
+      interaction code with no fake in `flutter test` (`location_service.dart`
+      9%, `app_map_controller.dart` 7%, `camera_service.dart` 40%), and
+      live-feed render paths already flagged in KNOWN_LIMITATIONS.md
+      (`vision_screen.dart` 36%). `genhtml` (lcov's HTML report tool)
+      isn't installed on this machine — `coverage/lcov.info` itself is
+      the artifact (consumable directly by CI services or editor
+      extensions like VS Code's Coverage Gutters); not attempted to
+      install a system tool without the project owner's go-ahead
+- [x] **Real gap caught before it wasted more time**: `dart run
+      coverage:test_with_coverage` (the `coverage` package's own
+      documented automated workflow) crashed with a native VM stack
+      unwind — it runs the plain `dart test` runner, which isn't
+      Flutter-aware and can't handle this project's `flutter_test`-based
+      widget tests or plugin dependencies. The correct tool for a Flutter
+      project is Flutter's own built-in `flutter test --coverage`, which
+      worked immediately once used instead
+- [x] **Added real on-device integration testing** via `package:integration_test`
+      (Flutter SDK package) — `integration_test/app_test.dart` runs the
+      real, unmodified `app.main()` entry point with real platform
+      bindings on a real device, not `flutter_test`'s fake environment.
+      **Correction to this phase's own original scoping**: the concern
+      that this would need `enableFlutterDriverExtension()` wired into
+      production `main.dart` (from KNOWN_LIMITATIONS.md, based on the
+      older `flutter_driver` package) turned out not to apply —
+      `integration_test` is the modern, officially-recommended
+      replacement specifically because it needs zero production code
+      changes; confirmed by reading the package's own README before
+      writing any code. Added `test_driver/integration_test.dart` too,
+      for `flutter drive`/CI compatibility
+- [x] **Scoped the first integration test to the boot → splash →
+      onboarding flow only** — deliberately nothing requiring GPS,
+      camera, or network permissions/credentials, so it runs standalone
+      on any connected device without extra setup. Deeper flows (search,
+      navigation, camera, auth) are real candidates for future
+      integration tests but need real permissions/credentials this
+      automated pass can't grant on its own — not attempted this round
+- [x] **Two real bugs found and fixed by actually running this on a
+      physical device** (not by inspection — the same discipline every
+      real-device session in this project has used):
+      - `pumpAndSettle()` right after `app.main()` never returns while
+        `SplashScreen`'s `LoadingIndicator` (an indeterminate
+        `CircularProgressIndicator`) is showing — a perpetual animation
+        that never "settles." Fixed with discrete `pump()` calls instead,
+        only using `pumpAndSettle()` once safely on the onboarding
+        `PageView`, which has no perpetual animation.
+      - The real splash `Timer` (2s, not an animation) doesn't schedule
+        a frame while waiting, so `pumpAndSettle()` alone returned well
+        before it fired — unlike a normal widget test, there's no fake
+        clock in a real on-device integration test to fast-forward
+        through it. Fixed with a genuine `Future.delayed` wall-clock wait.
+- [x] **Real, persistent USB flakiness on this dev machine, worked
+      around live**: the connected Samsung SM G781B repeatedly dropped
+      specifically during the ~20-25s Gradle build step (four consecutive
+      failures — `adb` `offline`/`unauthorized` states, mid-build
+      disconnects), even after `adb kill-server`/`start-server` recovery
+      and a physical reconnect. Switched to **wireless ADB debugging**
+      (`adb pair`, then `adb connect` to the device's Wi-Fi IP) at the
+      project owner's choice, which avoided the USB connection entirely
+      — the integration test then built, installed, and passed
+      end-to-end on the first attempt over Wi-Fi
+- [x] `flutter test integration_test/app_test.dart -d <device>` —
+      **passed live on real hardware**: real app boot, real 2-second
+      splash delay, real onboarding page navigation via real `tester.tap`
+      gestures, all confirmed working end-to-end
+- [x] `flutter analyze` clean across all new/changed files throughout
+      this phase
+
+### Phase 16 — Optimization (2026-08-21)
+- [x] **Scope decision, made with the project owner up front**: three
+      real directions were on the table (release build analysis/
+      shrinking, real DevTools/frame-timing profiling, GPS/sensor
+      update-rate tuning). The owner chose all three; for the third, I
+      flagged a real risk up front (no long-duration outdoor field test
+      available on this dev machine to validate new constants) and the
+      owner chose to proceed anyway — scoped to one principled, tested,
+      low-risk improvement rather than speculative re-tuning, see below
+- [x] **Real, release-build-breaking bug found and fixed**: `flutter
+      build apk --release --analyze-size` (the very first real release
+      build attempted in this project's history — every prior phase only
+      ever built debug APKs) failed outright with R8 reporting missing
+      classes from Phase 13's `google_mlkit_text_recognition` dependency
+      (`ChineseTextRecognizerOptions`, `DevanagariTextRecognizerOptions`,
+      `JapaneseTextRecognizerOptions`, `KoreanTextRecognizerOptions` —
+      referenced in the plugin's own Kotlin glue code's `when` branch,
+      even though this app only ever uses `TextRecognitionScript.latin`).
+      This had been silently broken since Phase 13 and nothing before
+      Phase 16 would have caught it, since minification/shrinking turns
+      out to already be **on by default** for release builds via
+      Flutter's own current tooling — this project just never built a
+      real release APK to notice. Fixed by creating
+      `android/app/proguard-rules.pro` with the real `-dontwarn` rules
+      R8 itself generated (`missing_rules.txt`), read directly rather
+      than guessed, and wiring it into `build.gradle.kts`'s release
+      `proguardFiles`
+- [x] **Real APK size measured and cut ~45% for the device that matters**:
+      the default `flutter build apk --release` bundles native libraries
+      for all three ABIs (arm64-v8a, armeabi-v7a, x86_64) into one 80MB
+      universal APK. `flutter build apk --release --split-per-abi`
+      produces per-ABI APKs instead — 43.8MB for arm64-v8a (the
+      connected Samsung SM G781B's real architecture, and what the
+      overwhelming majority of real Android phones use today) vs. the
+      80MB universal build. Also verified `flutter build appbundle
+      --release` (the actual format Play Store expects, which delivers
+      similarly-sized per-device splits automatically) builds cleanly
+      with the same proguard fix
+- [x] **Verified the shrunk release build actually works, not just
+      compiles** — installed the real arm64 split APK on the connected
+      device: real boot with no crash (confirmed via a real
+      `adb logcat` capture, pid-scoped), the real Google Map rendered,
+      and — after the project owner pointed out the route wasn't
+      showing, correctly diagnosed as the same "no GPS fix yet in a
+      fresh app session" behavior from Phase 14, not a shrinking
+      regression — the full search → route preview flow (including the
+      Phase 14 Navigator-race fix) worked correctly once a real GPS fix
+      existed
+- [x] **Real on-device frame-timing performance measured**, not assumed:
+      a temporary `WidgetsBinding.instance.addTimingsCallback` logger
+      (removed immediately after, same "temporary diagnostic, verify,
+      remove" pattern this project has used throughout) captured real
+      build/raster durations while the project owner panned and zoomed
+      the live map on a `--profile` build (the correct mode for real
+      performance data — not debug, which has JIT/assertion overhead,
+      and not release, which strips DevTools instrumentation). Result
+      over 308 real frames: **average 5.01ms/frame** (well under the
+      16.67ms 60fps budget), only **2.6% of frames (8/308)** exceeded
+      it. The single worst outlier (96ms raster) is attributable to the
+      native Google Maps SDK's own platform-view rendering during a
+      gesture, not to unnecessary Flutter widget rebuilds in this app's
+      own code. **Real, honest "no significant jank found" result — no
+      code changes were warranted from this pass**, which is itself a
+      legitimate outcome of profiling, not a null result to hide
+- [x] **One principled, tested GPS-smoothing improvement**: Phase 8's
+      `smoothLocation` (`position_smoothing.dart`) used a single fixed
+      exponential-smoothing alpha (0.35) regardless of how accurate the
+      new fix actually was. Replaced with a real, bounded, accuracy-
+      weighted alpha (`_effectiveAlpha`): a low-accuracy fix (near the
+      50m threshold `location_filter.dart` still accepts) is trusted
+      less (alpha 0.15, leans more on the previous smoothed value), a
+      high-accuracy fix (≤5m) is trusted more (alpha 0.5, tracks more
+      closely) — linearly interpolated and clamped between, a real,
+      well-known technique (accuracy-weighted exponential smoothing),
+      not an arbitrary re-guess of the single constant. Deliberately
+      still centered near the original fixed value at middling accuracy
+      for continuity. **Still not validated against a real long-
+      duration outdoor GPS stream** (no way to do that on this dev
+      machine, the same honest gap the original fixed alpha always
+      had) — tracked in KNOWN_LIMITATIONS.md, not overstated as "tuned"
+- [x] `dart format .`, `flutter analyze` (No issues found), `flutter
+      test` — all passed, **224/224** (2 new tests for the accuracy-
+      weighted smoothing behavior — existing `smoothLocation` tests used
+      range assertions already compatible with a variable alpha, so
+      none needed changing)
+- [x] Left the connected device in a clean state afterward (uninstalled
+      the profile/release test builds, reinstalled a normal debug build)
+
+### Phase 17 — Production build (2026-08-21)
+- [x] **Scope decision, made with the project owner up front**: this
+      phase's name was, for once, concrete rather than vague — the
+      repeatedly-flagged "release signing is still a TODO" gap (first
+      noted Phase 11, repeated Phase 14/16) was the obvious real target.
+      Two genuinely consequential, hard-to-reverse decisions needed the
+      owner's explicit go-ahead before touching anything: generating a
+      real release keystore (losing it means never being able to update
+      the app under that identity again on a real store), and
+      re-enabling Supabase email confirmation (a real UX/deliverability
+      tradeoff, not just a config flip). Owner said yes to both
+- [x] **Real release keystore generated**, following the official
+      Flutter docs' exact current steps (fetched and read live, not
+      recalled from memory, per DEVELOPMENT.md's rule): `keytool
+      -genkeypair` (RSA 2048, 10000-day validity, alias `upload`) at
+      `android/upload-keystore.jks`, migrated to the modern PKCS12
+      format per keytool's own recommendation (the intermediate `.jks.old`
+      backup was deleted — a real duplicate of sensitive key material,
+      not worth keeping around). A strong random password
+      (`openssl rand`) was generated rather than choosing something
+      memorable/weak
+- [x] `android/key.properties` created with the real credentials,
+      confirmed already covered by `android/.gitignore`'s existing
+      `key.properties`/`**/*.jks` rules (the Flutter template's own
+      defaults — no gitignore changes needed)
+- [x] `android/app/build.gradle.kts` wired up per the official pattern:
+      a real `signingConfigs.create("release")` reading
+      `key.properties`, with a **graceful-degradation fallback to debug
+      signing** if `key.properties`/the keystore it points to don't
+      exist — same resilience pattern `mapsApiKey`'s `local.properties`
+      fallback already established, so a fresh clone without the real
+      keystore still builds
+- [x] **Verified with a real signed build, not just a successful
+      compile**: `flutter build apk --release --split-per-abi
+      --target-platform=android-arm64` (after a `flutter clean` — the
+      officially documented step after a signing-config change, and a
+      real transient Gradle-cache/Windows file-locking error was hit and
+      resolved by simply retrying, unrelated to the signing change
+      itself). Confirmed via `apksigner verify --print-certs` that the
+      built APK is genuinely signed with the new certificate (`CN=TN AR
+      Navigation...`), not the debug one. Installed and booted cleanly
+      on the connected real device (confirmed via a real, pid-scoped
+      `adb logcat` capture — no crash)
+- [x] **Real SHA-1 extracted for the Google Maps API key restriction**:
+      `04:40:47:33:6E:64:25:8F:97:33:86:AB:A4:10:49:75:5B:6F:1F:B7`.
+      Adding this to the Google Cloud Console key restriction (alongside
+      the existing debug SHA-1) is the project owner's step — this
+      session has no access to their Google Cloud account; documented in
+      SETUP.md
+- [x] **Supabase email confirmation re-enabled and verified end-to-end,
+      live** — a real sign-up with a genuinely new email produced a real
+      confirmation email; clicking it redirected to Supabase's default
+      "Site URL" (`localhost:3000`, meant for local web dev — a real,
+      separate rough edge for a mobile-only app, see below) which failed
+      to load, but the confirmation itself completed server-side before
+      that redirect: reopening the app showed a real authenticated
+      session. Confirmed this was a genuinely fresh confirmation, not
+      persisted state, after first catching a real false alarm — an
+      earlier "signed in" report turned out to be a session persisted
+      from *before* confirmation was re-enabled (this session's repeated
+      `adb install -r` calls preserve app data across reinstalls),
+      resolved by signing out and testing with a truly new email
+- [x] **Real, deliberate scope boundary**: Supabase's default Site URL
+      (the confirmation email's redirect target) was left as-is rather
+      than reconfigured — it's cosmetic only (confirmation completes
+      before the redirect happens), and fixing it properly means real
+      mobile deep-linking (a custom URL scheme so the link reopens the
+      app instead of a browser dead end), which the project owner chose
+      not to add this phase. Documented as a known, low-priority UX
+      rough edge, not silently left unmentioned
+- [x] Device left in a clean state afterward (uninstalled every test
+      build, reinstalled a normal debug build)
+- [x] `dart format .`, `flutter analyze` (No issues found — the Kotlin
+      Gradle config change doesn't affect Dart analysis, re-run anyway
+      for a clean final check), `flutter test` — all passed, **224/224**
+      (no Dart test changes this phase; the real work was Android/Gradle
+      config plus a Supabase dashboard setting)
+
 ## Pending Tasks (by upcoming phase)
 
+- [ ] Post-Phase-17: add the release SHA-1
+      (`04:40:47:33:6E:64:25:8F:97:33:86:AB:A4:10:49:75:5B:6F:1F:B7`)
+      to the Google Cloud Console Maps API key restriction — the project
+      owner's step, needs their Google Cloud account access
+- [ ] Post-Phase-17: real production distribution still needs more than
+      signing — a Play Console listing (screenshots, privacy policy,
+      data-safety form), the `.env`-shipped Maps API key proxied through
+      a real backend instead of bundled client-side (flagged since Phase
+      11), and iOS build verification (still only scaffolded, never
+      built — no Xcode on this Windows dev machine). None of these were
+      in scope for "production build" as this project's 17-phase roadmap
+      defined it (making a real, correctly-signed, working build) — see
+      KNOWN_LIMITATIONS.md
+- [ ] Phase 16 follow-up: if a real long-duration outdoor GPS field test
+      ever becomes possible, validate (or retune) the new accuracy-
+      weighted smoothing alpha range against it — not attempted this
+      round, see this phase's entry above
+- [ ] Phase 15 follow-up: integration-test deeper flows (search, route
+      preview, navigation, auth, saved places) once there's a real way to
+      grant the permissions/credentials they need in an automated
+      on-device run — not attempted this round, see this phase's entry
+      above
+- [ ] Phase 15 follow-up: if `genhtml`/lcov tooling is ever installed on
+      this machine, generate an HTML coverage report from
+      `coverage/lcov.info` — not attempted this round without the
+      project owner's go-ahead to install a system tool
 - [ ] Phase 14 follow-up: before any production release, revisit turning
       "Confirm email" back on in the Supabase dashboard (or configure a
       real transactional email provider) — it was turned off for this

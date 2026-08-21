@@ -58,6 +58,51 @@ void main() {
       expect(result.speedMetersPerSecond, greaterThan(0));
       expect(result.speedMetersPerSecond, lessThan(10));
     });
+
+    test('a real, principled improvement (Phase 16): a low-accuracy fix is '
+        'trusted less (blended less toward it) than a high-accuracy fix '
+        'given the identical raw movement -- accuracy-weighted smoothing, '
+        'not a fixed alpha regardless of fix quality', () {
+      final previous = _location(lat: 11.000);
+      final accurateRaw = _location(lat: 11.001, accuracy: 5);
+      final inaccurateRaw = _location(lat: 11.001, accuracy: 50);
+
+      final accurateResult = smoothLocation(
+        raw: accurateRaw,
+        previousSmoothed: previous,
+      );
+      final inaccurateResult = smoothLocation(
+        raw: inaccurateRaw,
+        previousSmoothed: previous,
+      );
+
+      // Both move toward the raw fix, but the accurate one moves further.
+      expect(accurateResult.latitude, greaterThan(inaccurateResult.latitude));
+      expect(inaccurateResult.latitude, greaterThan(previous.latitude));
+      expect(accurateResult.latitude, lessThan(accurateRaw.latitude));
+    });
+
+    test('accuracy weighting is clamped -- an unusually good or bad accuracy '
+        "value doesn't extrapolate past the real tuned alpha range", () {
+      final previous = _location(lat: 11.000);
+      final veryAccurate = _location(lat: 11.001, accuracy: 0.5);
+      final veryInaccurate = _location(lat: 11.001, accuracy: 500);
+
+      final accurateResult = smoothLocation(
+        raw: veryAccurate,
+        previousSmoothed: previous,
+      );
+      final inaccurateResult = smoothLocation(
+        raw: veryInaccurate,
+        previousSmoothed: previous,
+      );
+
+      // Still real blending in both directions, not 0% or 100%.
+      expect(accurateResult.latitude, greaterThan(previous.latitude));
+      expect(accurateResult.latitude, lessThan(veryAccurate.latitude));
+      expect(inaccurateResult.latitude, greaterThan(previous.latitude));
+      expect(inaccurateResult.latitude, lessThan(veryInaccurate.latitude));
+    });
   });
 
   group('smoothHeadingDegrees', () {

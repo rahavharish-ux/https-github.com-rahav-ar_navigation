@@ -74,7 +74,7 @@ lib/
 | `lib/core/utils/location_filter.dart` | Pure GPS noise filter (`shouldAcceptLocationUpdate`) |
 | `lib/core/providers/location_provider.dart` | `LocationState` sealed hierarchy + `LocationNotifier` — real permission→stream flow. `LocationAvailable` carries both the raw fix and a Phase 8 `smoothedLocation`; the notifier also drives Phase 8's speed-adaptive GPS sampling (cancels/resubscribes the position stream when the speed bucket changes). Phase 12: both `LocationRequesting` and `LocationAvailable` gained `weakSignal`, driven by real rejected-fix streaks (not elapsed time — see the Phase 12 note below). `withWeakSignalFlagged` is the pulled-out pure state-transform (tested) |
 | `lib/core/utils/heading_fusion.dart` | `fuseHeading`/`FusedHeading`/`HeadingSource` — pure, tested GPS-course-vs-compass fusion (Phase 12), reusing Phase 8's `SpeedBucket` as the decision threshold |
-| `lib/core/utils/position_smoothing.dart` | `smoothLocation`/`smoothHeadingDegrees` — exponential moving average (raw fix → smoothed position/speed/heading) so the map marker and navigation math don't jitter within GPS accuracy noise; accuracy/timestamp always pass through unsmoothed |
+| `lib/core/utils/position_smoothing.dart` | `smoothLocation`/`smoothHeadingDegrees` — exponential moving average (raw fix → smoothed position/speed/heading) so the map marker and navigation math don't jitter within GPS accuracy noise; accuracy/timestamp always pass through unsmoothed. Smoothing alpha is accuracy-weighted (Phase 16), not fixed |
 | `lib/core/utils/speed_bucket.dart` | `SpeedBucket` (stationary/walking/driving) + `speedBucketFor` (hysteresis-based transition) + `distanceFilterMetersForSpeedBucket` — coarser GPS sampling at higher speed, tuned for battery |
 | `lib/features/home/widgets/current_location_badge.dart` | Shows the live GPS fix on the home screen |
 | `lib/features/diagnostics/diagnostics_screen.dart` | Developer/technical readout (not shown prominently to normal users): location (Phase 12: shows `weakSignal`), Phase 8 smoothing, (Phase 9) a Camera status section + "Preview camera" action, (Phase 10) an AR status section + "Check AR support" action, and (Phase 12) a "Fused heading" section showing the live `fuseHeading` result and which source it picked |
@@ -132,6 +132,9 @@ lib/
 | `lib/core/providers/saved_places_provider.dart` | `SavedPlacesState` sealed hierarchy + notifier, mirroring `search_provider.dart`'s shape |
 | `lib/features/saved_places/saved_places_screen.dart` | Real saved-places list with delete; reachable from `AccountScreen`, the home screen's "Saved" quick action, and route preview's "Save this place" |
 | `supabase/schema.sql` | Real schema (table + RLS policies) for the project owner to run in the Supabase SQL Editor — this session has no direct database access |
+| `integration_test/app_test.dart` | Real on-device integration test (Phase 15) — runs the actual, unmodified `app.main()` with real platform bindings on a real device. Scoped to boot → splash → onboarding only (no GPS/camera/network permissions needed) |
+| `test_driver/integration_test.dart` | `flutter drive`/CI entrypoint for the above |
+| `android/app/proguard-rules.pro` | Real R8 keep/dontwarn rules (Phase 16) — required for `google_mlkit_text_recognition` to survive release minification, found by actually running a release build, not guessed |
 | All other folders | Structure only, no files yet |
 
 Note: Riverpod 3.x moved the old `StateProvider` behind
@@ -415,6 +418,97 @@ be swapped later (see "Provider abstractions" in `DEVELOPMENT.md`):
   the search → route-preview flow, all fixed — see PROJECT_STATUS.md's
   real-device verification entry and KNOWN_LIMITATIONS.md for the full
   detail.
+- **Testing, expanded — decided (Phase 15):** three real, different
+  directions were on the table (closing already-flagged unit/widget
+  gaps, coverage reporting, real on-device integration testing) — the
+  project owner chose all three. `SearchNotifier`/`LocationNotifier`
+  each gained a small `@visibleForTesting createService()` hook so a
+  test can inject a fake service while keeping the real notifier's
+  timing/state-machine logic intact, the same "override just the
+  dependency" pattern this project's fixed-notifier tests already used
+  for whole notifiers, applied one level deeper. Coverage uses Flutter's
+  own built-in `flutter test --coverage`, not the `coverage` package's
+  `test_with_coverage` script — that script runs the non-Flutter-aware
+  `dart test` runner, which crashed on this project's suite (a real gap
+  found by trying it, documented in KNOWN_LIMITATIONS.md rather than
+  silently switched away from). Real on-device integration testing uses
+  `package:integration_test` (Flutter SDK), the modern replacement for
+  `flutter_driver` — unlike `flutter_driver`, it needs **no production
+  `main.dart` changes** (confirmed by reading the package's own README
+  before writing code, correcting an earlier assumption in this file/
+  KNOWN_LIMITATIONS.md that carried over from the `flutter_driver` era).
+  Scoped to the boot → splash → onboarding flow only, since it needs no
+  GPS/camera/network permissions; deeper flows are real future
+  candidates once there's a way to grant those automatically. Verified
+  live on a real device — see PROJECT_STATUS.md's Phase 15 entry for the
+  two real bugs (`pumpAndSettle()` hanging on a perpetual splash
+  animation, and needing a genuine wall-clock wait for a real `Timer`)
+  found and fixed by actually running it, and the real USB flakiness
+  worked around via wireless ADB debugging.
+- **Optimization — decided (Phase 16):** three real directions were on
+  the table (release build analysis/shrinking, real frame-timing
+  profiling, GPS/sensor tuning); the project owner chose all three, with
+  a real risk flagged up front for the third (no long-duration outdoor
+  field test on this dev machine to validate new constants against).
+  **Release builds**: found (by actually running `flutter build apk
+  --release --analyze-size` — the first real release build attempted in
+  this project's history) that R8 minification is already on by default
+  via Flutter's own tooling, and that it was silently broken since Phase
+  13 by `google_mlkit_text_recognition`'s unused per-script recognizer
+  classes. Fixed with `android/app/proguard-rules.pro`, wired into
+  `build.gradle.kts`'s release `proguardFiles` — the real `-dontwarn`
+  rules R8 itself generated, not guessed. `--split-per-abi` cuts the
+  real per-device download from an 80MB universal APK to 43.8MB for
+  arm64 (the architecture that matters for virtually all real Android
+  phones today); `appbundle` (the actual Play Store format) also
+  verified building cleanly. **Frame-timing profiling**: a temporary
+  `WidgetsBinding.addTimingsCallback` logger (removed immediately after
+  diagnosing, same pattern this project's real-device debugging sessions
+  have used throughout) on a `--profile` build (the correct mode — not
+  debug, not release) measured real map-interaction performance: 5.01ms
+  average frame time over 308 real frames, only 2.6% exceeding the
+  16.67ms/60fps budget, with the one real outlier attributable to native
+  Google Maps SDK rendering, not this app's own widget rebuilds — a real
+  "no jank found" result, not a null result glossed over. **GPS
+  smoothing**: `smoothLocation` (Phase 8) moved from a single fixed
+  exponential-smoothing alpha to a real, bounded, accuracy-weighted one
+  (`_effectiveAlpha` in `position_smoothing.dart`) — a principled,
+  tested, well-known technique (trust a more-accurate fix more), not an
+  arbitrary re-guess of the single constant, and still honestly flagged
+  as unvalidated against a real outdoor GPS stream, the same gap the
+  original fixed value always had. See PROJECT_STATUS.md's Phase 16
+  entry and KNOWN_LIMITATIONS.md for full detail, including the real,
+  separate release-signing gap this phase did not address.
+- **Production build — decided (Phase 17), closing a gap flagged since
+  Phase 11:** unlike most late-roadmap phase names, this one had a
+  concrete, well-defined target — real release signing, repeatedly
+  flagged as an unaddressed TODO in Phases 11/14/16. Two genuinely
+  consequential, hard-to-reverse decisions needed the project owner's
+  explicit go-ahead first: generating a real keystore (losing it means
+  never updating the app under that identity again on a real store),
+  and re-enabling Supabase email confirmation (a real deliverability/UX
+  tradeoff). Both approved. The keystore was generated following
+  Flutter's own current official docs (fetched and read live, not
+  recalled from memory) — `android/upload-keystore.jks` (gitignored,
+  already covered by the Flutter template's own default `.gitignore`
+  rules), `android/key.properties` holding the real credentials, and
+  `build.gradle.kts`'s `signingConfigs.create("release")` reading it —
+  with a **graceful-degradation fallback to debug signing** if
+  `key.properties`/the keystore don't exist, the same resilience pattern
+  `mapsApiKey`'s `local.properties` fallback already established, so a
+  fresh clone without the real keystore still builds. Verified with
+  `apksigner verify --print-certs` that a real built release APK
+  actually carries the new certificate, and that it installs/boots
+  cleanly on a real device — not just that the build succeeds.
+  Re-enabling Supabase email confirmation was verified live with a real
+  confirmation email, including catching and correctly diagnosing a
+  real false alarm (a persisted session from before re-enabling, not a
+  bypass) before confirming the real flow. See PROJECT_STATUS.md's Phase
+  17 entry and KNOWN_LIMITATIONS.md for the two real, deliberately
+  deferred loose ends: adding the new release SHA-1 to the Google Maps
+  API key restriction (the project owner's own Google Cloud Console
+  step), and the confirmation email's dev-only default redirect target
+  (cosmetic, not functionally blocking).
 - **Navigation/routing-in-app package** (e.g. `go_router`) — once real
   multi-screen navigation exists (Phase 2 onward).
 - **Map data strategy — decided (Phase 4), superseded (Phase 11):**

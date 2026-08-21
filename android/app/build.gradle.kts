@@ -1,3 +1,4 @@
+import java.io.FileInputStream
 import java.util.Properties
 
 plugins {
@@ -19,6 +20,21 @@ val localProperties = Properties().apply {
 }
 val mapsApiKey: String =
     localProperties.getProperty("MAPS_API_KEY") ?: "YOUR_GOOGLE_MAPS_API_KEY_HERE"
+
+// Phase 17: real release signing, read from key.properties (already
+// gitignored — see android/.gitignore, along with **/*.jks) rather than
+// hardcoded here. Falls back to debug signing (this project's prior
+// state) if key.properties/the keystore it points to don't exist yet —
+// same graceful-degradation pattern as mapsApiKey above — so a fresh
+// clone without the real keystore still builds.
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+val hasReleaseSigning =
+    keystorePropertiesFile.exists() &&
+        run {
+            keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+            file(keystoreProperties.getProperty("storeFile")).exists()
+        }
 
 android {
     namespace = "com.tnarnav.tn_ar_navigation"
@@ -46,11 +62,38 @@ android {
         manifestPlaceholders["mapsApiKey"] = mapsApiKey
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+                storeFile = file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // Real release signing (Phase 17) when key.properties/the
+            // keystore it points to exist; falls back to the debug
+            // keystore otherwise (this project's prior state, and what a
+            // fresh clone without the real keystore still gets) so
+            // `flutter run --release` keeps working either way.
+            signingConfig = signingConfigs.getByName(
+                if (hasReleaseSigning) "release" else "debug",
+            )
+            // R8 minification/shrinking is on by default for release
+            // builds via Flutter's own tooling (Phase 16 found this by
+            // actually running `flutter build apk --release`, not by
+            // assuming) -- proguard-rules.pro adds the real keep/dontwarn
+            // rules that were missing (google_mlkit_text_recognition's
+            // unused per-script recognizer classes), without which a
+            // release build fails outright.
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 }

@@ -95,16 +95,61 @@ technology (documented so they're never overstated).
     stays on the free public demo server for now (see the point above);
     only the map tiles and search/geocoding moved to Google.
 - **GPS position smoothing and speed-adaptive sampling (Phase 8) are real
-  but tuned by fixed constants, not yet validated on a real device.**
-  `smoothLocation` uses a fixed exponential-smoothing factor (α=0.35) and
-  `speedBucketFor`'s stationary/walking/driving thresholds use fixed
-  hysteresis bands — reasonable starting values, but never tuned against
-  a real GPS stream outdoors (see the no-Android-device limitation
-  below). `LocationNotifier`'s resubscribe-on-speed-bucket-change logic
-  has no dedicated unit test (`position_smoothing.dart` and
-  `speed_bucket.dart`'s pure functions are tested; the notifier wiring
-  that calls them on a live stream isn't) — worth adding if this logic
-  changes.
+  but still not validated against a real long-duration outdoor GPS
+  stream** (no way to do that on this dev machine). `speedBucketFor`'s
+  stationary/walking/driving thresholds still use fixed hysteresis bands
+  — reasonable starting values, unchanged. **`smoothLocation`'s smoothing
+  factor is no longer a single fixed constant (Phase 16)**: it's now a
+  real, bounded, accuracy-weighted alpha (0.15 for a low-accuracy fix
+  near the 50m acceptance threshold, up to 0.5 for a high-accuracy fix
+  ≤5m, linearly interpolated and clamped between) — a principled, tested,
+  well-known technique (trust a better fix more), not a re-guess of the
+  single number, and deliberately centered near the original fixed value
+  at middling accuracy for continuity. Still the same category of honest
+  gap as before: real, tested logic, but never validated against a real
+  outdoor GPS stream — worth revisiting if a real field test ever
+  becomes possible. `LocationNotifier`'s resubscribe-on-speed-bucket-change
+  logic **is now tested (Phase 15)** — closed, see the Phase 15 entry
+  above.
+- **Release builds are real, verified working, and now genuinely signed
+  (Phase 17) — closing a gap flagged since Phase 11.** Before Phase 16,
+  this project had never built a real release/minified APK; the first
+  attempt failed outright (R8 missing classes from Phase 13's ML Kit
+  dependency — see PROJECT_STATUS.md's Phase 16 entry), now fixed via
+  `android/app/proguard-rules.pro`. `flutter build apk --release
+  --split-per-abi` (43.8MB for arm64, the real device architecture that
+  matters) and `flutter build appbundle --release` both build cleanly.
+  **A real release keystore now exists** (`android/upload-keystore.jks`,
+  gitignored, generated via `keytool` per Flutter's own current official
+  docs) and `build.gradle.kts` signs release builds with it — confirmed
+  via `apksigner verify --print-certs` that a real built APK carries the
+  new certificate, not the debug one, and that it installs/boots cleanly
+  on a real device. **Still needed before any real distribution**: the
+  new release SHA-1
+  (`04:40:47:33:6E:64:25:8F:97:33:86:AB:A4:10:49:75:5B:6F:1F:B7`) has to
+  be added to the Google Cloud Console Maps API key restriction (see
+  SETUP.md's Phase 11 section) — this session has no access to the
+  project owner's Google Cloud account, so this is their step, not yet
+  done. Frame-timing profiling (Phase 16) was a single real pass (map
+  pan/zoom on a `--profile` build, 308 frames, avg 5.01ms) — real data,
+  but not comprehensive coverage of every screen/interaction; worth
+  another pass if a specific screen is ever reported as janky.
+- **Supabase email confirmation is back on (Phase 17), verified live with
+  a real confirmation email — but its redirect target is still
+  Supabase's dev-only default.** Re-enabling "Confirm email" (off since
+  Phase 14 for testing convenience) was verified end-to-end: a real
+  sign-up sent a real confirmation email, and clicking it genuinely
+  confirmed the account server-side (reopening the app showed a real
+  authenticated session) — even though the email's redirect itself
+  failed to load, because Supabase's default "Site URL"
+  (`localhost:3000`, meant for local web dev) isn't meaningful for this
+  mobile-only app. **Deliberately left as-is** — a real, known, low-
+  priority UX rough edge, not silently unmentioned: confirmation
+  completes before that redirect happens, so it doesn't block anything
+  functionally, but anyone tapping the link sees a browser dead end
+  instead of a clean confirmation page. Properly fixing it means real
+  mobile deep-linking (a custom URL scheme so the link reopens the app),
+  which the project owner chose not to add this phase.
 - **Map gesture behavior is unverified by automated tests, but was
   confirmed manually on a real device (2026-08-20).** Widget tests only
   confirm `AppMapView` builds without error — simulating real drag/pinch/
@@ -347,7 +392,16 @@ technology (documented so they're never overstated).
   machine is Windows and has no Xcode toolchain. iOS verification is
   deferred until Android is stable, per the project's Android-first
   priority.
-- **Test coverage is still growing.** Widget tests cover app boot/nav,
+- **Test coverage is still growing — 73.7% line coverage (1476/2002
+  lines) as of Phase 15's LCOV baseline** (`flutter test --coverage` →
+  `coverage/lcov.info`; the `coverage` package's own `test_with_coverage`
+  script isn't usable here — it runs the non-Flutter-aware `dart test`
+  runner, which crashes on this project's `flutter_test`-based suite).
+  The lowest-covered files are almost entirely the already-documented
+  permanent categories below: real platform/plugin interaction code
+  with no fake in `flutter test` (`location_service.dart`,
+  `app_map_controller.dart`, `camera_service.dart`) and live-feed render
+  paths. Widget tests cover app boot/nav,
   onboarding paging, home content/interaction, the diagnostics screen,
   the search screen (idle/failure states), route preview (idle/loading/
   ready/mode-unsupported/failure states, Start Navigation enable/disable
@@ -411,33 +465,45 @@ technology (documented so they're never overstated).
   combinations this app uses — a real, live-rendered map can't be
   verified in `flutter_test` (no native platform view host), same
   category of gap as the camera/AR live states, now also true for the
-  map itself. Still missing: a timing-precise test of the live GPS-driven
-  update loop end-to-end (current tests drive `NavigationNotifier` with
-  individual location updates, not a simulated route drive), and
-  voice/spoken guidance has no tests since it doesn't exist yet.
+  map itself. **Closed (Phase 15):** `navigation_provider_test.dart`
+  gained a real full-simulated-drive test — a continuous sequence of GPS
+  fixes walking the entire route from origin through the turn to
+  arrival, not just isolated single-update snapshots. Voice/spoken
+  guidance still has no tests since it doesn't exist yet.
 - **Search's debounce/loading/results flow isn't covered by a timing-
-  precise test.** The widget tests verify the idle prompt and the
-  failure path (network blocked), but not the loading-state transition
-  mid-debounce or a successful-results render — doing that properly
-  needs either `fakeAsync` or injecting a fake `GeocodingService` into
-  the widget tree, neither of which was set up this phase. Worth adding
-  if search logic changes.
+  precise test.** **Closed (Phase 15):** `search_provider_test.dart` now
+  covers the real debounce → loading → results sequence via `fakeAsync`,
+  using a small testability hook (`SearchNotifier.createService`) to
+  inject a fake `GeocodingService` while keeping the real `Timer`-based
+  debounce logic intact.
 - **Live visual/screenshot verification tooling: resolved for widget-tree
-  inspection, still genuinely missing for actual screenshots.** Phase
-  2-era note (kept for history): the Dart/Flutter MCP server's
+  inspection and, as of Phase 15, for real on-device tap/gesture
+  automation too — screenshots specifically are still not wired up.**
+  Phase 2-era note (kept for history): the Dart/Flutter MCP server's
   `get_widget_tree`/`get_runtime_errors` tools once rejected the
   connection with a stale-looking SDK version error despite this project
   running a Dart version well above the stated minimum. That resolved
   itself by the time of the Phase 11 real-device session (2026-08-20) —
   both tools worked reliably against a real device all session, and were
   the main way this project verified real behavior without ever taking a
-  pixel screenshot. What's still genuinely missing: no screenshot or
-  tap/text-entry automation. `flutter_driver`'s MCP commands (`screenshot`,
-  `tap`, `enter_text`, etc.) exist but require
-  `enableFlutterDriverExtension()` wired into a real Flutter entry point
-  first — not added, since that's test instrumentation in production
-  `main.dart` territory no phase has been asked to add. All real-device
-  verification this project has done is either the project owner
+  pixel screenshot. **Real tap/gesture automation was added in Phase 15**
+  via `package:integration_test` (`integration_test/app_test.dart`,
+  `test_driver/integration_test.dart`) — the modern, officially-
+  recommended replacement for the older `flutter_driver` approach this
+  file previously described as needing `enableFlutterDriverExtension()`
+  wired into production `main.dart`; that concern turned out not to
+  apply to `integration_test`, which needs zero production code changes
+  and was verified live on a real device (`tester.tap`, real onboarding
+  navigation). Scoped deliberately narrow this round: only the boot →
+  splash → onboarding flow, since it needs no GPS/camera/network
+  permissions — deeper flows (search, navigation, camera, auth) are real
+  candidates for future integration tests but need real permissions/
+  credentials an automated pass can't grant on its own, not attempted
+  yet. Screenshot capture specifically (as opposed to tap/assert
+  automation) is still not wired up — `integration_test` supports it via
+  `IntegrationTestWidgetsFlutterBinding.takeScreenshot()`, just not used
+  yet. All real-device
+  verification before Phase 15 was either the project owner
   physically operating the device while Claude watches state via
   `get_widget_tree`/`get_runtime_errors`/`adb logcat`, or `flutter test`
   widget tests asserting exact expected text/controls — never an actual
@@ -448,6 +514,18 @@ technology (documented so they're never overstated).
   quirk (Samsung's background-process management), not a bug in this
   project. `adb logcat` (which survives it) became the fallback for
   anything that needed to keep observing across a drop.
+- **The Samsung SM G781B's USB connection is genuinely unreliable on this
+  dev machine during longer-running builds (Phase 15, 2026-08-21).** The
+  device repeatedly dropped (`adb` `offline`/`unauthorized` states,
+  mid-build disconnects) specifically during the ~20-25s Gradle build
+  step of `flutter test integration_test/...`, four consecutive times,
+  surviving neither `adb kill-server`/`start-server` recovery nor a
+  physical reconnect. **Wireless ADB debugging** (`adb pair` with the
+  device's pairing code, then `adb connect` to its Wi-Fi IP) worked
+  around this entirely — the same integration test then built, installed,
+  and passed on the first attempt over Wi-Fi. Worth trying wireless
+  debugging first if USB flakiness recurs during a longer build/install
+  step on this device.
 
 ## Permanent — inherent to the technology (must never be overstated)
 
