@@ -1,7 +1,10 @@
 import 'package:camera/camera.dart';
+import 'package:flutter/widgets.dart' show AppLifecycleState;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:meta/meta.dart';
 
 import '../../services/camera_service.dart';
+import '../utils/camera_lifecycle.dart';
 import '../utils/camera_selection.dart';
 
 sealed class CameraState {
@@ -61,19 +64,37 @@ class CameraNotifier extends Notifier<CameraState> {
   /// fields instead of deriving them from `state`.
   CameraController? _controller;
 
+  /// Incremented by [stop] and by a lifecycle release. A [start] in flight
+  /// captures it before awaiting the platform and, if it has changed (or
+  /// the provider was disposed) by the time a controller is ready, releases
+  /// that controller instead of publishing it (Phase 2 M0).
+  int _startGeneration = 0;
+
+  /// True while the camera is closed only because the app left the
+  /// foreground, so `resumed` knows to re-open it.
+  bool _releasedForLifecycle = false;
+
   @override
   CameraState build() {
-    _service = const CameraService();
+    _service = createService();
     ref.onDispose(_disposeController);
     return const CameraInitial();
   }
 
+  /// Overridden in tests to inject a fake `CameraService` (Phase 2 M0),
+  /// same pattern as `LocationNotifier.createService`.
+  @visibleForTesting
+  CameraService createService() => const CameraService();
+
   Future<void> start() async {
     if (state is CameraRequesting) return;
+    final generation = _startGeneration;
+    bool isStale() => !ref.mounted || generation != _startGeneration;
     state = const CameraRequesting();
 
     try {
       final cameras = await _service.listCameras();
+      if (isStale()) return;
       final description = pickPreferredCamera(cameras);
       if (description == null) {
         state = const CameraUnavailable();
@@ -81,20 +102,55 @@ class CameraNotifier extends Notifier<CameraState> {
       }
 
       final controller = await _service.initializeController(description);
+      if (isStale()) {
+        // Stopped, backgrounded, or disposed while initializing: nobody
+        // will ever show or release this controller, so release it now.
+        controller.dispose();
+        return;
+      }
       _controller = controller;
       state = CameraAvailable(controller);
     } on CameraException catch (error) {
+      if (isStale()) return;
       state = isPermissionDeniedCode(error.code)
           ? const CameraPermissionDenied()
           : CameraError(error.description ?? error.code);
     } catch (error) {
+      if (isStale()) return;
       state = CameraError(error.toString());
     }
   }
 
   void stop() {
+    _startGeneration++;
+    _releasedForLifecycle = false;
     _disposeController();
     state = const CameraInitial();
+  }
+
+  /// Forwarded from the screens showing the camera (see
+  /// `CameraLifecycleBinding`). Releases the camera when the app leaves the
+  /// foreground and re-opens it on return — see [cameraLifecycleActionFor].
+  void handleAppLifecycleState(AppLifecycleState lifecycleState) {
+    switch (cameraLifecycleActionFor(
+      lifecycleState,
+      hasOpenCamera: _controller != null,
+      releasedForLifecycle: _releasedForLifecycle,
+    )) {
+      case CameraLifecycleAction.none:
+        return;
+      case CameraLifecycleAction.release:
+        _startGeneration++;
+        _releasedForLifecycle = true;
+        _disposeController();
+        // Same state as "not started yet": the screens already show
+        // "Starting the camera..." for it, which is what the user sees for
+        // the moment it takes to re-open on return.
+        state = const CameraInitial();
+      case CameraLifecycleAction.reacquire:
+        _releasedForLifecycle = false;
+        start();
+    }
   }
 
   void _disposeController() {

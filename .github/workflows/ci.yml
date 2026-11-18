@@ -1,0 +1,60 @@
+# Phase 2 M0: every change must pass the same gate on the pinned toolchain.
+# Flutter is pinned to 3.38.4 (see .fvmrc and SETUP.md); upgrading the SDK
+# is a separate, deliberate change, never a side effect of CI.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.38.4
+          channel: stable
+          cache: true
+
+      # pubspec.yaml bundles .env as an asset and .env is gitignored, so a
+      # fresh checkout needs the placeholder copy (no real keys in CI).
+      - name: Create placeholder .env
+        run: cp .env.example .env
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Lockfile unchanged by pub get
+        run: git diff --exit-code pubspec.lock
+
+      - name: Formatting
+        run: dart format --output=none --set-exit-if-changed lib test integration_test test_driver
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test with coverage
+        run: flutter test --coverage
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lcov
+          path: coverage/lcov.info
+
+      # The release build is part of the gate because Phase 16 found
+      # release-only R8 failures that a debug build does not show. Without
+      # key.properties it falls back to debug signing (build.gradle.kts).
+      - name: Build debug APK
+        run: flutter build apk --debug
+
+      - name: Build release APK
+        run: flutter build apk --release

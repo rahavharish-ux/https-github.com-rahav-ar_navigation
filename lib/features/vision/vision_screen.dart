@@ -7,7 +7,9 @@ import '../../core/providers/camera_provider.dart';
 import '../../core/providers/vision_provider.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../widgets/buttons/app_button.dart';
+import '../../widgets/common/camera_lifecycle_binding.dart';
 import '../../widgets/common/loading_indicator.dart';
+import '../../widgets/common/status_message.dart';
 
 /// Real on-device computer vision (Phase 13): street-sign text recognition
 /// and generic scene labeling, run against a single captured camera frame —
@@ -22,7 +24,8 @@ class VisionScreen extends ConsumerStatefulWidget {
   ConsumerState<VisionScreen> createState() => _VisionScreenState();
 }
 
-class _VisionScreenState extends ConsumerState<VisionScreen> {
+class _VisionScreenState extends ConsumerState<VisionScreen>
+    with WidgetsBindingObserver, CameraLifecycleBinding<VisionScreen> {
   @override
   void initState() {
     super.initState();
@@ -60,20 +63,20 @@ class _VisionScreenState extends ConsumerState<VisionScreen> {
       child: Scaffold(
         appBar: AppBar(title: const Text(AppStrings.visionTitle)),
         body: switch (cameraState) {
-          CameraInitial() || CameraRequesting() => const _CenteredMessage(
+          CameraInitial() || CameraRequesting() => const StatusMessage(
             message: AppStrings.cameraStarting,
             child: LoadingIndicator(),
           ),
-          CameraUnavailable() => const _CenteredMessage(
+          CameraUnavailable() => const StatusMessage(
             icon: Icons.no_photography_outlined,
             message: AppStrings.cameraUnavailable,
           ),
-          CameraPermissionDenied() => _CenteredMessage(
+          CameraPermissionDenied() => StatusMessage(
             icon: Icons.videocam_off_outlined,
             message: AppStrings.cameraPermissionDenied,
             onRetry: () => ref.read(cameraProvider.notifier).start(),
           ),
-          CameraError() => _CenteredMessage(
+          CameraError() => StatusMessage(
             icon: Icons.error_outline,
             message: AppStrings.cameraGenericError,
             onRetry: () => ref.read(cameraProvider.notifier).start(),
@@ -204,47 +207,6 @@ class _VisionResultPanel extends StatelessWidget {
                     ],
                   ),
         },
-      ),
-    );
-  }
-}
-
-class _CenteredMessage extends StatelessWidget {
-  const _CenteredMessage({
-    required this.message,
-    this.icon,
-    this.child,
-    this.onRetry,
-  });
-
-  final String message;
-  final IconData? icon;
-  final Widget? child;
-  final VoidCallback? onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.lg),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ?child,
-            if (icon != null)
-              Icon(
-                icon,
-                size: 48,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            const SizedBox(height: AppSpacing.md),
-            Text(message, textAlign: TextAlign.center),
-            if (onRetry != null) ...[
-              const SizedBox(height: AppSpacing.md),
-              AppButton(label: AppStrings.cameraTryAgain, onPressed: onRetry),
-            ],
-          ],
-        ),
       ),
     );
   }

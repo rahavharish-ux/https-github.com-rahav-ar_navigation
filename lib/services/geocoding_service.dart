@@ -53,10 +53,11 @@ class GeocodingService {
   /// `X-Android-Cert` header requires: uppercase hex, no colons. Not a
   /// secret (it's derived from the debug keystore and is meant to be
   /// shared with Google Cloud Console — see SETUP.md's `signingReport`
-  /// step). A release build needs its own release-cert SHA-1 added
-  /// alongside this one in Cloud Console before shipping — tracked, not
-  /// yet done, since release signing itself is still a TODO (see
-  /// `build.gradle.kts`).
+  /// step). Release signing exists since Phase 17, but this header still
+  /// sends the debug SHA-1 in every build, so Places search works in a
+  /// release build only while the debug certificate stays on the key's
+  /// allow-list. These headers are self-declared by the client, not a
+  /// security boundary — see PHASE2_RISKS.md (P5) and KNOWN_LIMITATIONS.md.
   static const _androidCertSha1 = 'B5302537C7A585F5836992A478F1E73A07775750';
 
   /// Tamil Nadu's real bounding box (8.083–13.583°N, 76.25–80.333°E) —

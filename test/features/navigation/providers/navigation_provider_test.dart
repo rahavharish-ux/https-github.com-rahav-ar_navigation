@@ -1,25 +1,15 @@
-import 'dart:io';
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:tn_ar_navigation/core/providers/location_provider.dart';
+import 'package:tn_ar_navigation/core/providers/routing_service_provider.dart';
+import 'package:tn_ar_navigation/core/utils/geo_math.dart';
 import 'package:tn_ar_navigation/features/navigation/providers/navigation_provider.dart';
 import 'package:tn_ar_navigation/models/location_model.dart';
 import 'package:tn_ar_navigation/models/navigation_instruction.dart';
 import 'package:tn_ar_navigation/models/route_model.dart';
 
-/// A real recalculation (off-route path) would hit the network — blocked
-/// here so it fails fast and deterministically instead of hanging on this
-/// environment's flaky network, same approach as
-/// `route_preview_screen_test.dart`.
-class _NoNetworkHttpOverrides extends HttpOverrides {
-  @override
-  HttpClient createHttpClient(SecurityContext? context) {
-    return super.createHttpClient(context)
-      ..connectionTimeout = const Duration(milliseconds: 1);
-  }
-}
+import '../../../fakes/fake_routing_service.dart';
 
 /// Lets the test push arbitrary [LocationState] values — like a live GPS
 /// tick — without a real geolocator platform channel.
@@ -40,14 +30,6 @@ AppLocation _fixAt(double lat, double lng) => AppLocation(
 );
 
 void main() {
-  setUpAll(() {
-    HttpOverrides.global = _NoNetworkHttpOverrides();
-  });
-
-  tearDownAll(() {
-    HttpOverrides.global = null;
-  });
-
   // A short straight route with a real depart step (at the origin — should
   // never be treated as the "next" maneuver) and a real turn before arrival.
   const origin = LatLng(11.000, 78.000);
@@ -89,19 +71,62 @@ void main() {
   );
 
   late _FakeLocationNotifier fakeLocation;
+  late FakeRoutingService routing;
   late ProviderContainer container;
 
   setUp(() {
+    routing = FakeRoutingService();
     container = ProviderContainer(
       overrides: [
         locationProvider.overrideWith(() {
           fakeLocation = _FakeLocationNotifier();
           return fakeLocation;
         }),
+        routingServiceProvider.overrideWithValue(routing),
       ],
     );
     addTearDown(container.dispose);
   });
+
+  /// A different, real-shaped route a recalculation can resolve to.
+  final reroute = AppRoute(
+    distanceMeters: 800,
+    durationSeconds: 90,
+    polyline: const [LatLng(11.005, 78.005), destination],
+    instructions: [
+      NavigationInstruction.fromOsrmStep({
+        'distance': 800.0,
+        'name': 'Service Road',
+        'maneuver': {
+          'type': 'depart',
+          'modifier': 'left',
+          'location': [78.005, 11.005],
+        },
+      }),
+      NavigationInstruction.fromOsrmStep({
+        'distance': 0.0,
+        'name': '',
+        'maneuver': {
+          'type': 'arrive',
+          'modifier': null,
+          'location': [destination.longitude, destination.latitude],
+        },
+      }),
+    ],
+  );
+
+  /// Lets queued microtasks (a resolved fake request and the code awaiting
+  /// it) run, without any wall-clock delay.
+  Future<void> settle() => Future<void>.delayed(Duration.zero);
+
+  /// Starts a session and pushes one fix far off the polyline, leaving a
+  /// recalculation request pending in [routing].
+  void startAndGoOffRoute() {
+    container
+        .read(navigationProvider.notifier)
+        .start(route: route, destination: destination);
+    fakeLocation.emit(LocationAvailable(_fixAt(11.005, 78.005)));
+  }
 
   test('start() skips the depart step and targets the real next maneuver', () {
     container
@@ -170,10 +195,14 @@ void main() {
         NavigationStatus.recalculating,
       );
 
-      // The blocked-network recalculation fails fast; self-heals back to
-      // offRoute (not a separate terminal error state) with a diagnostics
-      // message, ready to retry on the next GPS update.
-      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect(routing.requests, hasLength(1));
+      expect(routing.lastRequest.destination, destination);
+
+      // The recalculation fails; navigation self-heals back to offRoute
+      // (not a separate terminal error state) with a diagnostics message,
+      // ready to retry on the next GPS update.
+      routing.lastRequest.fail();
+      await settle();
 
       final state = container.read(navigationProvider);
       expect(state.status, NavigationStatus.offRoute);
@@ -222,11 +251,95 @@ void main() {
       NavigationStatus.recalculating,
     );
 
-    await Future<void>.delayed(const Duration(milliseconds: 200));
+    expect(routing.requests, hasLength(1));
+    routing.lastRequest.fail();
+    await settle();
 
     final state = container.read(navigationProvider);
     expect(state.status, NavigationStatus.offRoute);
     expect(state.errorMessage, isNotNull);
+  });
+
+  test('a successful recalculation adopts the new route and resumes '
+      'navigating', () async {
+    startAndGoOffRoute();
+    routing.lastRequest.succeed(reroute);
+    await settle();
+
+    final state = container.read(navigationProvider);
+    expect(state.route, same(reroute));
+    expect(state.errorMessage, isNull);
+    expect(state.status, isNot(NavigationStatus.recalculating));
+    expect(state.status, isNot(NavigationStatus.idle));
+  });
+
+  group('session teardown while a recalculation is in flight (M0 '
+      'regression)', () {
+    test('stop() during a pending recalculation that then succeeds stays '
+        'idle -- the stopped session is not resurrected', () async {
+      startAndGoOffRoute();
+      expect(
+        container.read(navigationProvider).status,
+        NavigationStatus.recalculating,
+      );
+
+      container.read(navigationProvider.notifier).stop();
+      routing.lastRequest.succeed(reroute);
+      await settle();
+
+      final state = container.read(navigationProvider);
+      expect(state.status, NavigationStatus.idle);
+      expect(state.route, isNull);
+      expect(state.destination, isNull);
+      expect(state.isActive, isFalse);
+    });
+
+    test('stop() during a pending recalculation that then fails stays idle '
+        'with no error', () async {
+      startAndGoOffRoute();
+      container.read(navigationProvider.notifier).stop();
+      routing.lastRequest.fail();
+      await settle();
+
+      final state = container.read(navigationProvider);
+      expect(state.status, NavigationStatus.idle);
+      expect(state.errorMessage, isNull);
+    });
+
+    test('a recalculation from a previous session cannot overwrite a newly '
+        'started session', () async {
+      startAndGoOffRoute();
+      final stale = routing.lastRequest;
+      container.read(navigationProvider.notifier).stop();
+      // Back on the route before the new session starts, so the new
+      // session has no reroute of its own in flight.
+      fakeLocation.emit(LocationAvailable(_fixAt(11.001, 78.000)));
+      container
+          .read(navigationProvider.notifier)
+          .start(route: route, destination: destination);
+      expect(routing.requests, hasLength(1));
+
+      stale.succeed(reroute);
+      await settle();
+
+      final state = container.read(navigationProvider);
+      expect(state.route, same(route));
+      expect(state.status, NavigationStatus.navigating);
+      expect(state.currentInstruction?.type, 'turn');
+    });
+
+    test('disposing the provider during a pending recalculation does not '
+        'write state afterwards (no use-after-dispose error)', () async {
+      startAndGoOffRoute();
+      final pending = routing.lastRequest;
+      container.dispose();
+
+      // Before the fix, completing the request made `_recalculate` assign
+      // `state` on a disposed Ref, which surfaced as an uncaught async
+      // error and failed the test.
+      pending.succeed(reroute);
+      await settle();
+    });
   });
 
   test('pause stops progress updates until resume', () {
@@ -294,6 +407,91 @@ void main() {
     final finalState = container.read(navigationProvider);
     expect(finalState.status, NavigationStatus.arrived);
     expect(finalState.remainingDistanceMeters, 0);
+  });
+
+  group('remaining distance and ETA (M0 regression)', () {
+    // OSRM step i's `distance` runs from maneuver i to maneuver i+1. With
+    // the next maneuver at index k, the user is still on step k-1, so the
+    // distance left is (distance to maneuver k) + sum(step k..end).
+
+    test('includes the distance still to travel to the next maneuver', () {
+      container
+          .read(navigationProvider.notifier)
+          .start(route: route, destination: destination);
+      final fix = _fixAt(11.0045, 78.000);
+      fakeLocation.emit(LocationAvailable(fix));
+
+      final state = container.read(navigationProvider);
+      final toTurn = haversineMeters(
+        LatLng(fix.latitude, fix.longitude),
+        turnPoint,
+      );
+      expect(state.currentInstruction?.type, 'turn');
+      expect(state.distanceToNextManeuverMeters, closeTo(toTurn, 0.01));
+      expect(state.remainingDistanceMeters, closeTo(toTurn + 555 + 0, 0.01));
+    });
+
+    test('on the final leg it is the distance to the destination, not 0', () {
+      container
+          .read(navigationProvider.notifier)
+          .start(route: route, destination: destination);
+      // At the turn point the index advances to the final "arrive" step,
+      // ~556m before the destination.
+      fakeLocation.emit(LocationAvailable(_fixAt(11.005, 78.000)));
+
+      final state = container.read(navigationProvider);
+      expect(state.currentInstruction?.type, 'arrive');
+      expect(state.status, isNot(NavigationStatus.arrived));
+      expect(
+        state.remainingDistanceMeters,
+        closeTo(haversineMeters(turnPoint, destination), 0.01),
+      );
+      expect(state.remainingDistanceMeters, greaterThan(500));
+    });
+
+    test("ETA is remaining distance at the route's average pace", () {
+      container
+          .read(navigationProvider.notifier)
+          .start(route: route, destination: destination);
+      fakeLocation.emit(LocationAvailable(_fixAt(11.0045, 78.000)));
+
+      final state = container.read(navigationProvider);
+      final pace = route.durationSeconds / route.distanceMeters;
+      expect(
+        state.remainingDurationSeconds,
+        closeTo(state.remainingDistanceMeters! * pace, 0.01),
+      );
+    });
+
+    test('remaining distance never increases while progressing forward '
+        'along the route', () {
+      container
+          .read(navigationProvider.notifier)
+          .start(route: route, destination: destination);
+
+      double? previous;
+      for (final lat in [
+        11.001,
+        11.002,
+        11.003,
+        11.004,
+        11.0045,
+        11.005,
+        11.006,
+        11.007,
+        11.008,
+        11.009,
+      ]) {
+        fakeLocation.emit(LocationAvailable(_fixAt(lat, 78.000)));
+        final remaining = container
+            .read(navigationProvider)
+            .remainingDistanceMeters!;
+        if (previous != null) {
+          expect(remaining, lessThanOrEqualTo(previous + 0.01), reason: '$lat');
+        }
+        previous = remaining;
+      }
+    });
   });
 
   test('stop resets to idle', () {

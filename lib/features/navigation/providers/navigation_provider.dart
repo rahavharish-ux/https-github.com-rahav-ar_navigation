@@ -3,6 +3,7 @@ import 'package:latlong2/latlong.dart';
 
 import '../../../core/map/location_latlng.dart';
 import '../../../core/providers/location_provider.dart';
+import '../../../core/providers/routing_service_provider.dart';
 import '../../../core/utils/geo_math.dart';
 import '../../../models/navigation_instruction.dart';
 import '../../../models/route_model.dart';
@@ -161,10 +162,17 @@ class NavigationNotifier extends Notifier<NavigationState> {
   late final RoutingService _service;
   int _wrongDirectionStreak = 0;
 
+  /// Incremented by every [start] and [stop]. An async recalculation
+  /// captures it before awaiting the routing service and drops its result
+  /// if the session it belonged to has since been stopped or replaced —
+  /// otherwise a reroute finishing after Stop would resurrect the session,
+  /// or overwrite a newer session's route (Phase 2 M0 regression tests).
+  int _sessionGeneration = 0;
+
   @override
   NavigationState build() {
-    _service = RoutingService();
-    ref.onDispose(_service.dispose);
+    // Owned (and disposed) by routingServiceProvider, not by this notifier.
+    _service = ref.read(routingServiceProvider);
 
     ref.listen<LocationState>(locationProvider, (previous, next) {
       if (next is LocationAvailable) {
@@ -176,6 +184,7 @@ class NavigationNotifier extends Notifier<NavigationState> {
   }
 
   void start({required AppRoute route, required LatLng destination}) {
+    _sessionGeneration++;
     _wrongDirectionStreak = 0;
     state = NavigationState(
       status: NavigationStatus.navigating,
@@ -211,6 +220,7 @@ class NavigationNotifier extends Notifier<NavigationState> {
   }
 
   void stop() {
+    _sessionGeneration++;
     _wrongDirectionStreak = 0;
     state = const NavigationState();
   }
@@ -280,12 +290,21 @@ class NavigationNotifier extends Notifier<NavigationState> {
       );
     }
 
-    final remainingDistance = instructions
-        .skip(index)
-        .fold<double>(
-          0,
-          (sum, instruction) => sum + instruction.distanceMeters,
-        );
+    // OSRM step i's distance spans maneuver i -> maneuver i+1. With the
+    // next maneuver at [index], the user is still on step index-1, so the
+    // distance left is the stretch up to that maneuver plus every step from
+    // it onward. Summing only the steps (as before Phase 2 M0) dropped the
+    // first term — e.g. reporting 0 m remaining for the whole final leg.
+    // [distanceToManeuver] is straight-line, not along the polyline; true
+    // along-route progress is planned for M4 (route projection).
+    final remainingDistance =
+        distanceToManeuver +
+        instructions
+            .skip(index)
+            .fold<double>(
+              0,
+              (sum, instruction) => sum + instruction.distanceMeters,
+            );
     final pace = route.distanceMeters > 0
         ? route.durationSeconds / route.distanceMeters
         : 0.0;
@@ -340,12 +359,20 @@ class NavigationNotifier extends Notifier<NavigationState> {
     final destination = state.destination;
     if (current == null || destination == null) return;
 
+    final generation = _sessionGeneration;
     state = state.copyWith(status: NavigationStatus.recalculating);
+
+    // True when this provider was disposed, or the session that requested
+    // the reroute was stopped/replaced, while the request was in flight —
+    // the result then belongs to nobody and must not touch `state`.
+    bool isStale() => !ref.mounted || generation != _sessionGeneration;
+
     try {
       final route = await _service.getDrivingRoute(
         origin: current,
         destination: destination,
       );
+      if (isStale()) return;
       state = state.copyWith(
         route: route,
         instructionIndex: _initialInstructionIndex(route.instructions),
@@ -354,11 +381,13 @@ class NavigationNotifier extends Notifier<NavigationState> {
       );
       _onLocationUpdate(current);
     } on RoutingException catch (error) {
+      if (isStale()) return;
       state = state.copyWith(
         status: NavigationStatus.offRoute,
         errorMessage: error.message,
       );
     } catch (error) {
+      if (isStale()) return;
       state = state.copyWith(
         status: NavigationStatus.offRoute,
         errorMessage: error.toString(),

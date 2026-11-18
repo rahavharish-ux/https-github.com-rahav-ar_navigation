@@ -46,6 +46,13 @@ class SearchNotifier extends Notifier<SearchState> {
   late final GeocodingService _service;
   Timer? _debounceTimer;
 
+  /// Incremented on every [queryChanged]. A search captures it before
+  /// awaiting the network and drops its result if the query has changed
+  /// since — otherwise a slow response for an older query could overwrite
+  /// newer results, or results could reappear after the field was cleared
+  /// (Phase 2 M0 regression tests).
+  int _queryGeneration = 0;
+
   @override
   SearchState build() {
     _service = createService();
@@ -64,6 +71,7 @@ class SearchNotifier extends Notifier<SearchState> {
   GeocodingService createService() => GeocodingService();
 
   void queryChanged(String query) {
+    _queryGeneration++;
     _debounceTimer?.cancel();
     final trimmed = query.trim();
     if (trimmed.length < _minQueryLength) {
@@ -74,13 +82,18 @@ class SearchNotifier extends Notifier<SearchState> {
   }
 
   Future<void> _search(String query) async {
+    final generation = _queryGeneration;
+    bool isStale() => !ref.mounted || generation != _queryGeneration;
+
     state = const SearchLoading();
     try {
       final results = await _service.search(query);
+      if (isStale()) return;
       state = results.isEmpty
           ? const SearchNoResults()
           : SearchResults(results);
     } catch (_) {
+      if (isStale()) return;
       state = const SearchFailed();
     }
   }

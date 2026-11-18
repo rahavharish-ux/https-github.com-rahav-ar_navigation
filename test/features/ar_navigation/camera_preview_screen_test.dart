@@ -26,6 +26,12 @@ class _FixedCameraNotifier extends CameraNotifier {
 
   @override
   void stop() {}
+
+  final List<AppLifecycleState> lifecycleStates = [];
+
+  @override
+  void handleAppLifecycleState(AppLifecycleState lifecycleState) =>
+      lifecycleStates.add(lifecycleState);
 }
 
 void main() {
@@ -112,5 +118,34 @@ void main() {
     await tester.pump();
 
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('forwards app lifecycle changes to the camera notifier while '
+      'shown, and stops once the screen is gone (M0)', (
+    WidgetTester tester,
+  ) async {
+    final notifier = _FixedCameraNotifier(const CameraInitial());
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [cameraProvider.overrideWith(() => notifier)],
+        child: const MaterialApp(home: CameraPreviewScreen()),
+      ),
+    );
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    expect(notifier.lifecycleStates, [
+      AppLifecycleState.inactive,
+      AppLifecycleState.resumed,
+    ]);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [cameraProvider.overrideWith(() => notifier)],
+        child: const MaterialApp(home: SizedBox()),
+      ),
+    );
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    expect(notifier.lifecycleStates, hasLength(2));
   });
 }

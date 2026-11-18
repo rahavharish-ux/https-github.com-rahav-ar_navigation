@@ -30,6 +30,27 @@ class _FakeGeocodingService extends GeocodingService {
   void dispose() {}
 }
 
+/// Answers each query after its own configurable delay and echoes the
+/// query back as the place name, so a test can tell which request's
+/// results ended up in state. Lets a slow, older request finish after a
+/// fast, newer one — the real out-of-order case on a mobile network.
+class _PerQueryDelayGeocodingService extends GeocodingService {
+  _PerQueryDelayGeocodingService(this._delays);
+
+  final Map<String, Duration> _delays;
+
+  @override
+  Future<List<Place>> search(String query, {int limit = 8}) {
+    return Future<List<Place>>.delayed(
+      _delays[query] ?? Duration.zero,
+      () => [Place(name: query, address: query, latitude: 0, longitude: 0)],
+    );
+  }
+
+  @override
+  void dispose() {}
+}
+
 class _TestableSearchNotifier extends SearchNotifier {
   _TestableSearchNotifier(this._service);
 
@@ -125,6 +146,88 @@ void main() {
       async.elapse(const Duration(seconds: 1));
 
       expect(container.read(searchProvider), isA<SearchIdle>());
+    });
+  });
+
+  group('stale responses (M0 regression)', () {
+    ProviderContainer containerWith(GeocodingService service) {
+      final container = ProviderContainer(
+        overrides: [
+          searchProvider.overrideWith(() => _TestableSearchNotifier(service)),
+        ],
+      );
+      addTearDown(container.dispose);
+      return container;
+    }
+
+    List<String> resultNames(SearchState state) => switch (state) {
+      SearchResults(:final results) => [for (final p in results) p.name],
+      _ => const [],
+    };
+
+    test('a slow older search finishing after a newer one does not '
+        'overwrite the newer results', () {
+      fakeAsync((async) {
+        final container = containerWith(
+          _PerQueryDelayGeocodingService({
+            'Madurai': const Duration(milliseconds: 1000),
+            'Chennai': const Duration(milliseconds: 50),
+          }),
+        );
+        final notifier = container.read(searchProvider.notifier);
+
+        notifier.queryChanged('Madurai');
+        async.elapse(const Duration(milliseconds: 400)); // Madurai in flight
+        notifier.queryChanged('Chennai');
+        async.elapse(const Duration(milliseconds: 400)); // Chennai in flight
+        async.elapse(const Duration(milliseconds: 50)); // Chennai resolves
+        expect(resultNames(container.read(searchProvider)), ['Chennai']);
+
+        async.elapse(const Duration(seconds: 1)); // Madurai resolves late
+        expect(resultNames(container.read(searchProvider)), ['Chennai']);
+      });
+    });
+
+    test('an in-flight search that resolves after the query was cleared '
+        'leaves the state Idle', () {
+      fakeAsync((async) {
+        final container = containerWith(
+          _PerQueryDelayGeocodingService({
+            'Madurai': const Duration(milliseconds: 500),
+          }),
+        );
+        final notifier = container.read(searchProvider.notifier);
+
+        notifier.queryChanged('Madurai');
+        async.elapse(const Duration(milliseconds: 400)); // in flight
+        notifier.queryChanged('');
+        expect(container.read(searchProvider), isA<SearchIdle>());
+
+        async.elapse(const Duration(seconds: 1));
+        expect(container.read(searchProvider), isA<SearchIdle>());
+      });
+    });
+
+    test('disposing during an in-flight search does not throw when it '
+        'resolves', () {
+      fakeAsync((async) {
+        final container = ProviderContainer(
+          overrides: [
+            searchProvider.overrideWith(
+              () => _TestableSearchNotifier(
+                _PerQueryDelayGeocodingService({
+                  'Madurai': const Duration(milliseconds: 500),
+                }),
+              ),
+            ),
+          ],
+        );
+        container.read(searchProvider.notifier).queryChanged('Madurai');
+        async.elapse(const Duration(milliseconds: 400)); // in flight
+        container.dispose();
+
+        async.elapse(const Duration(seconds: 1));
+      });
     });
   });
 }

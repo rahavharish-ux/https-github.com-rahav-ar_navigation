@@ -3,6 +3,7 @@ import 'package:latlong2/latlong.dart';
 
 import '../../models/route_model.dart';
 import '../../services/routing_service.dart';
+import 'routing_service_provider.dart';
 import 'travel_mode_provider.dart';
 
 sealed class RouteState {
@@ -49,8 +50,8 @@ class RouteNotifier extends Notifier<RouteState> {
 
   @override
   RouteState build() {
-    _service = RoutingService();
-    ref.onDispose(_service.dispose);
+    // Owned (and disposed) by routingServiceProvider, not by this notifier.
+    _service = ref.read(routingServiceProvider);
     return const RouteIdle();
   }
 

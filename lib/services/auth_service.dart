@@ -94,7 +94,8 @@ class AuthService {
     if (!SupabaseConfig.isConfigured) {
       throw const AuthServiceException(
         'No Supabase project configured. Copy .env.example to .env and set '
-        'SUPABASE_URL/SUPABASE_ANON_KEY to a real project — see SETUP.md.',
+        'SUPABASE_URL/SUPABASE_PUBLISHABLE_KEY to a real project — see '
+        'SETUP.md.',
       );
     }
     try {

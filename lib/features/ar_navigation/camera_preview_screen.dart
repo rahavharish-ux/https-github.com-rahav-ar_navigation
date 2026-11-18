@@ -5,8 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/constants/app_strings.dart';
 import '../../core/providers/camera_provider.dart';
 import '../../core/theme/app_spacing.dart';
-import '../../widgets/buttons/app_button.dart';
+import '../../widgets/common/camera_lifecycle_binding.dart';
 import '../../widgets/common/loading_indicator.dart';
+import '../../widgets/common/status_message.dart';
 
 /// Real live camera feed (Phase 9) — no AR overlays yet, that's Phase 10.
 /// Reachable only from the diagnostics screen for now: the home screen's
@@ -20,7 +21,8 @@ class CameraPreviewScreen extends ConsumerStatefulWidget {
       _CameraPreviewScreenState();
 }
 
-class _CameraPreviewScreenState extends ConsumerState<CameraPreviewScreen> {
+class _CameraPreviewScreenState extends ConsumerState<CameraPreviewScreen>
+    with WidgetsBindingObserver, CameraLifecycleBinding<CameraPreviewScreen> {
   @override
   void initState() {
     super.initState();
@@ -54,23 +56,23 @@ class _CameraPreviewScreenState extends ConsumerState<CameraPreviewScreen> {
       child: Scaffold(
         appBar: AppBar(title: const Text(AppStrings.cameraPreviewTitle)),
         body: switch (state) {
-          CameraInitial() || CameraRequesting() => const _StatusMessage(
+          CameraInitial() || CameraRequesting() => const StatusMessage(
             message: AppStrings.cameraStarting,
             child: LoadingIndicator(),
           ),
           CameraAvailable(:final controller) => _LivePreview(
             controller: controller,
           ),
-          CameraUnavailable() => _StatusMessage(
+          CameraUnavailable() => StatusMessage(
             icon: Icons.no_photography_outlined,
             message: AppStrings.cameraUnavailable,
           ),
-          CameraPermissionDenied() => _StatusMessage(
+          CameraPermissionDenied() => StatusMessage(
             icon: Icons.videocam_off_outlined,
             message: AppStrings.cameraPermissionDenied,
             onRetry: () => ref.read(cameraProvider.notifier).start(),
           ),
-          CameraError() => _StatusMessage(
+          CameraError() => StatusMessage(
             icon: Icons.error_outline,
             message: AppStrings.cameraGenericError,
             onRetry: () => ref.read(cameraProvider.notifier).start(),
@@ -109,47 +111,6 @@ class _LivePreview extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _StatusMessage extends StatelessWidget {
-  const _StatusMessage({
-    required this.message,
-    this.icon,
-    this.child,
-    this.onRetry,
-  });
-
-  final String message;
-  final IconData? icon;
-  final Widget? child;
-  final VoidCallback? onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.lg),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ?child,
-            if (icon != null)
-              Icon(
-                icon,
-                size: 48,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            const SizedBox(height: AppSpacing.md),
-            Text(message, textAlign: TextAlign.center),
-            if (onRetry != null) ...[
-              const SizedBox(height: AppSpacing.md),
-              AppButton(label: AppStrings.cameraTryAgain, onPressed: onRetry),
-            ],
-          ],
-        ),
-      ),
     );
   }
 }

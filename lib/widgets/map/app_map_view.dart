@@ -14,9 +14,9 @@ import '../../core/map/app_map_controller.dart';
 /// "My Location" layer (`myLocationEnabled`), not a custom marker —
 /// real GPS+device-sensor rendering handled at the platform level, the
 /// same visual Google Maps itself shows. This app's own
-/// `locationProvider`/`compassProvider` still exist and still feed
-/// navigation math, off-route detection, and diagnostics; they just
-/// aren't what draws this dot. Requires a real, billing-enabled Google
+/// `locationProvider` still feeds navigation math and off-route detection,
+/// and `compassProvider` feeds the diagnostics screen only; neither is
+/// what draws this dot. Requires a real, billing-enabled Google
 /// Maps API key — see SETUP.md and KNOWN_LIMITATIONS.md.
 class AppMapView extends StatelessWidget {
   const AppMapView({
