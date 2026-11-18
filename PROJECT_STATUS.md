@@ -1722,14 +1722,28 @@ dependency was added.
 - [x] GitHub Actions CI added (format, analyze, test + coverage, debug and
       release APK) — **not yet run**: the branch could not be pushed from
       the Phase 2 session
+- [x] **M0 closure:** pausing while a reroute is in flight is no longer
+      undone when it finishes (it stays paused and adopts the new route; a
+      failed reroute also stays paused); resuming before the reroute
+      finishes waits for it instead of starting a second, parallel reroute;
+      a finished reroute and resume() both use the newest GPS fix rather
+      than a stale position
+- [x] **M0 closure, camera:** a camera that finishes initializing after
+      the app was backgrounded is released and re-opened on resume; a
+      vision capture interrupted by backgrounding no longer throws an
+      uncaught error
 - [x] Every confirmed defect got a regression test written first and seen
-      failing on the unfixed code. Results: **251/251 tests pass** (3
-      consecutive full runs), line coverage 74.6% (1523/2042)
+      failing on the unfixed code. Final results on Flutter 3.38.4:
+      `dart format` clean, `flutter analyze` No issues found, **261/261
+      tests pass** (3 consecutive full runs), line coverage **75.1%**
+      (1554/2070)
 - [ ] Android debug/release build **not run** for M0: no Android SDK in
       the Phase 2 session environment (download host blocked). Runs in CI
       once pushed
-- [ ] Device checks for M0 not yet done (camera background/resume; stop
-      during a forced reroute)
+- [ ] Device checks for M0 not yet done — checklist ready in
+      `docs/field-tests/M0_DEVICE_CHECKLIST.md`
+- [ ] Commits not yet pushed to GitHub (access refused, HTTP 403), so CI
+      has not run
 
 ## Pending Tasks (by upcoming phase)
 

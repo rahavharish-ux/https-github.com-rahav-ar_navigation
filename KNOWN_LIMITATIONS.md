@@ -14,12 +14,15 @@ technology (documented so they're never overstated).
   along the route polyline — on a curving road it reads slightly short
   until along-route progress lands (Phase 2 M4). The camera is now
   released when the app is backgrounded and re-opened on return; this is
-  covered by unit/widget tests but not yet checked on a device. Pausing
-  navigation while a reroute is in flight is overridden when the reroute
-  completes (navigation resumes) — found by code reading during M0, not
-  yet covered by a test or fixed. M0's Android builds were not run (no
-  Android SDK in that environment); CI builds both APKs once the branch is
-  pushed.
+  covered by unit/widget tests but not yet checked on a device (see
+  `docs/field-tests/M0_DEVICE_CHECKLIST.md`). The pause-during-reroute bug
+  found during M0 is fixed (M0 closure). Remaining, by design for now:
+  navigation is not tracked while the app is backgrounded (no foreground
+  service); after a pause, the first wrong-direction check compares
+  against the pre-pause position (it needs two consecutive confirmations,
+  so a single reading cannot trigger a reroute). M0's Android builds were
+  not run (no Android SDK in that environment); CI builds both APKs once
+  the branch is pushed, and the commits have not yet been pushed.
 
 - **GPS (Phase 3), the map (Phase 4), search (Phase 5), driving routes
   (Phase 6), and turn-by-turn navigation (Phase 7) are all real now.**

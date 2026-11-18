@@ -293,7 +293,13 @@ them rewritten, + 27 new) · line coverage **74.6%** (1523/2042; was 73.7%).
 
 **Not done in M0:** Android debug/release builds (no Android SDK in this
 environment — `dl.google.com` is refused by its network policy) and the
-device checklist. New finding during M0, by inspection only: pausing during
-an in-flight reroute is undone when the reroute completes (tracked in
-`KNOWN_LIMITATIONS.md`).
+device checklist (`docs/field-tests/M0_DEVICE_CHECKLIST.md`).
+
+**M0 closure:** the pause-during-reroute bug found during M0 was reproduced
+by regression tests and fixed, together with related races (resume before
+a reroute finishes started a second reroute; a finished reroute and
+`resume()` used stale positions) and two camera gaps (a camera finishing
+initialization in the background stayed open; a capture interrupted by
+backgrounding threw an uncaught error). Final: **261 passed** (3 runs),
+coverage **75.1%** (1554/2070).
 

@@ -31,19 +31,24 @@ CameraX frame source.
 
 ---
 
-## M0 — Stabilize the base  ✅ code complete (2026-11-18)
+## M0 — Stabilize the base  ✅ code complete, provisionally accepted (2026-11-18)
 
-> **Status.** Approved and implemented. Acceptance check:
+> **Status.** Implemented, plus the M0 closure fixes (pause during
+> reroute; reroute/resume using stale positions; camera finishing init
+> in the background; capture interrupted by backgrounding). Acceptance
+> check:
 >
 > | Criterion | Result |
 > |---|---|
-> | Existing + new tests pass, 3 consecutive runs | ✅ **251/251** locally on Flutter 3.38.4, 3/3 runs · ⏳ in CI: not yet run (branch not pushed) |
-> | Analyzer clean on pinned SDK | ✅ "No issues found" on 3.38.4 |
-> | Debug + release APK build | ⏳ **Not run** — no Android SDK in this environment (`dl.google.com` refused); CI workflow builds both |
+> | Existing + new tests pass, 3 consecutive runs | ✅ **261/261** locally on Flutter 3.38.4, 3/3 runs · ⏳ in CI: not yet run |
+> | Format + analyzer clean on pinned SDK | ✅ 0 files changed · "No issues found" |
+> | Debug + release APK build | ⏳ **Not run** — no Android SDK in this environment (`dl.google.com` refused); the CI workflow builds both but has never run |
+> | Pushed to GitHub | ⏳ **No** — push refused (HTTP 403); commits exist only locally |
+> | Device checklist | ⏳ Not run — `docs/field-tests/M0_DEVICE_CHECKLIST.md` |
 > | No Phase 1 behaviour change except fixed defects | ✅ All 224 original tests kept (2 rewritten to use the fake routing service); no feature or dependency added |
 >
-> Coverage 74.6% (was 73.7%). Device checklist below not yet executed.
-> **M1 does not start until the two ⏳ items are green.** Details:
+> Coverage 75.1% (was 73.7% before M0). **M1 does not start until the
+> owner approves; the ⏳ items must be green first.** Details:
 > `PHASE2_AUDIT.md` §10.
 
 **Objective.** Make the existing suite hermetic and green, fix the confirmed
@@ -78,7 +83,7 @@ is measured against a trustworthy baseline.
 
 **Integration tests.** Existing `integration_test/app_test.dart` unchanged and passing on a device.
 
-**Device testing.** Smoke: drive/walk a short route; background/foreground the app on the camera preview screen; start and stop navigation during a forced reroute.
+**Device testing.** `docs/field-tests/M0_DEVICE_CHECKLIST.md` (camera lifecycle and permissions, navigation stop/pause/restart during a reroute).
 
 **Acceptance criteria**
 - 224 existing tests + new regression tests all pass, 3 consecutive runs, in CI.
