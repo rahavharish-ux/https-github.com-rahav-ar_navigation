@@ -1720,8 +1720,7 @@ dependency was added.
 - [x] Shared `StatusMessage` widget replaces two identical private copies;
       inaccurate comments/messages corrected
 - [x] GitHub Actions CI added (format, analyze, test + coverage, debug and
-      release APK) — **not yet run**: the branch could not be pushed from
-      the Phase 2 session
+      release APK)
 - [x] **M0 closure:** pausing while a reroute is in flight is no longer
       undone when it finishes (it stays paused and adopts the new route; a
       failed reroute also stays paused); resuming before the reroute
@@ -1737,13 +1736,16 @@ dependency was added.
       `dart format` clean, `flutter analyze` No issues found, **261/261
       tests pass** (3 consecutive full runs), line coverage **75.1%**
       (1554/2070)
-- [ ] Android debug/release build **not run** for M0: no Android SDK in
-      the Phase 2 session environment (download host blocked). Runs in CI
-      once pushed
-- [ ] Device checks for M0 not yet done — checklist ready in
-      `docs/field-tests/M0_DEVICE_CHECKLIST.md`
-- [ ] Commits not yet pushed to GitHub (access refused, HTTP 403), so CI
-      has not run
+- [x] **Pushed** to `origin/claude/phase-2-technical-audit-2di7x1` at
+      `b6e0d7f` (all five Phase 2 commits, normal push, history intact)
+- [x] **CI run #1 green** on `b6e0d7f` — https://github.com/rahavharish-ux/https-github.com-rahav-ar_navigation/actions/runs/44253276288: lockfile unchanged,
+      format clean, `flutter analyze` No issues found, **261 tests passed
+      (0 failed, 0 skipped)**, `app-debug.apk` built, `app-release.apk`
+      built (118.3 MB universal, debug-signed fallback since CI has no
+      release keystore)
+- [ ] **Device checks not run yet** — A1–A9, B1–B5, C1–C10 in
+      `docs/field-tests/M0_DEVICE_CHECKLIST.md`. M0 is not formally closed
+      until these are run and recorded
 
 ## Pending Tasks (by upcoming phase)
 

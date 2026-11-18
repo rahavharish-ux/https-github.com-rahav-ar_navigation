@@ -35,21 +35,22 @@ CameraX frame source.
 
 > **Status.** Implemented, plus the M0 closure fixes (pause during
 > reroute; reroute/resume using stale positions; camera finishing init
-> in the background; capture interrupted by backgrounding). Acceptance
-> check:
+> in the background; capture interrupted by backgrounding). Code, tests
+> and docs approved by the owner. Acceptance check:
 >
 > | Criterion | Result |
 > |---|---|
-> | Existing + new tests pass, 3 consecutive runs | ✅ **261/261** locally on Flutter 3.38.4, 3/3 runs · ⏳ in CI: not yet run |
-> | Format + analyzer clean on pinned SDK | ✅ 0 files changed · "No issues found" |
-> | Debug + release APK build | ⏳ **Not run** — no Android SDK in this environment (`dl.google.com` refused); the CI workflow builds both but has never run |
-> | Pushed to GitHub | ⏳ **No** — push refused (HTTP 403); commits exist only locally |
-> | Device checklist | ⏳ Not run — `docs/field-tests/M0_DEVICE_CHECKLIST.md` |
+> | Existing + new tests pass, 3 consecutive runs | ✅ **261/261** locally (3/3 runs) · ✅ **261 passed, 0 failed** in CI |
+> | Format + analyzer clean on pinned SDK | ✅ CI: 0 files changed · "No issues found" (Flutter 3.38.4) |
+> | Debug + release APK build | ✅ CI built `app-debug.apk` and `app-release.apk` (118.3 MB) |
+> | Pushed to GitHub | ✅ `origin/claude/phase-2-technical-audit-2di7x1` @ `b6e0d7f` |
+> | Device checklist | ⏳ **Not run** — `docs/field-tests/M0_DEVICE_CHECKLIST.md` (A1–A9, B1–B5, C1–C10) |
 > | No Phase 1 behaviour change except fixed defects | ✅ All 224 original tests kept (2 rewritten to use the fake routing service); no feature or dependency added |
 >
-> Coverage 75.1% (was 73.7% before M0). **M1 does not start until the
-> owner approves; the ⏳ items must be green first.** Details:
-> `PHASE2_AUDIT.md` §10.
+> CI run: https://github.com/rahavharish-ux/https-github.com-rahav-ar_navigation/actions/runs/44253276288. Coverage 75.1% (1554/2070; was 73.7% before M0).
+> **M0 is not formally closed until the device checklist is run and
+> recorded, and M1 does not start without the owner's approval.**
+> Details: `PHASE2_AUDIT.md` §10.
 
 **Objective.** Make the existing suite hermetic and green, fix the confirmed
 navigation defects, pin the toolchain, and add CI — so every Phase 2 change

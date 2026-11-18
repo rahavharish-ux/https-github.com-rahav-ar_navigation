@@ -20,9 +20,16 @@ technology (documented so they're never overstated).
   navigation is not tracked while the app is backgrounded (no foreground
   service); after a pause, the first wrong-direction check compares
   against the pre-pause position (it needs two consecutive confirmations,
-  so a single reading cannot trigger a reroute). M0's Android builds were
-  not run (no Android SDK in that environment); CI builds both APKs once
-  the branch is pushed, and the commits have not yet been pushed.
+  so a single reading cannot trigger a reroute). Android debug and release
+  APKs now build in CI (https://github.com/rahavharish-ux/https-github.com-rahav-ar_navigation/actions/runs/44253276288); they have not
+  yet been installed on a phone for M0 — the device checklist is still
+  outstanding. CI's universal release APK measured 118.3 MB, larger than
+  the 80 MB universal build Phase 16 recorded on the Windows dev machine;
+  M0 added no dependencies, and the cause (toolchain/host differences or
+  dependency changes since Phase 16) has not been investigated. CI release
+  builds are debug-signed (no keystore in CI) and use placeholder API
+  keys, so they are build checks, not distributable or fully functional
+  apps.
 
 - **GPS (Phase 3), the map (Phase 4), search (Phase 5), driving routes
   (Phase 6), and turn-by-turn navigation (Phase 7) are all real now.**
