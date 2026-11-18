@@ -8,6 +8,19 @@ technology (documented so they're never overstated).
 
 ## Temporary — resolved by a later phase
 
+- **Phase 2 M0 (2026-11-18) — what changed and what is still open.**
+  Remaining distance/ETA during navigation now include the stretch to the
+  next maneuver, but that stretch is measured in a straight line, not
+  along the route polyline — on a curving road it reads slightly short
+  until along-route progress lands (Phase 2 M4). The camera is now
+  released when the app is backgrounded and re-opened on return; this is
+  covered by unit/widget tests but not yet checked on a device. Pausing
+  navigation while a reroute is in flight is overridden when the reroute
+  completes (navigation resumes) — found by code reading during M0, not
+  yet covered by a test or fixed. M0's Android builds were not run (no
+  Android SDK in that environment); CI builds both APKs once the branch is
+  pushed.
+
 - **GPS (Phase 3), the map (Phase 4), search (Phase 5), driving routes
   (Phase 6), and turn-by-turn navigation (Phase 7) are all real now.**
   Selecting a search result opens a real Route Preview screen: a live

@@ -13,7 +13,7 @@ the device checklist has measured them.
 
 | # | Milestone | Depends on | Size |
 |---|---|---|---|
-| **M0** | Stabilize the base | — | S |
+| **M0** | Stabilize the base — **code complete; builds + device checks pending** | — | S |
 | M1 | Sensor hub + trace record/replay | M0 | M |
 | M2 | i18n (Tamil/English) + voice guidance | M0 | M |
 | M3 | Pedestrian routing provider | M0 | M |
@@ -31,7 +31,20 @@ CameraX frame source.
 
 ---
 
-## M0 — Stabilize the base  ⭐ recommended first milestone
+## M0 — Stabilize the base  ✅ code complete (2026-11-18)
+
+> **Status.** Approved and implemented. Acceptance check:
+>
+> | Criterion | Result |
+> |---|---|
+> | Existing + new tests pass, 3 consecutive runs | ✅ **251/251** locally on Flutter 3.38.4, 3/3 runs · ⏳ in CI: not yet run (branch not pushed) |
+> | Analyzer clean on pinned SDK | ✅ "No issues found" on 3.38.4 |
+> | Debug + release APK build | ⏳ **Not run** — no Android SDK in this environment (`dl.google.com` refused); CI workflow builds both |
+> | No Phase 1 behaviour change except fixed defects | ✅ All 224 original tests kept (2 rewritten to use the fake routing service); no feature or dependency added |
+>
+> Coverage 74.6% (was 73.7%). Device checklist below not yet executed.
+> **M1 does not start until the two ⏳ items are green.** Details:
+> `PHASE2_AUDIT.md` §10.
 
 **Objective.** Make the existing suite hermetic and green, fix the confirmed
 navigation defects, pin the toolchain, and add CI — so every Phase 2 change
@@ -44,7 +57,7 @@ is measured against a trustworthy baseline.
 - `lib/features/ar_navigation/camera_preview_screen.dart`, `lib/features/vision/vision_screen.dart` — app-lifecycle handling for the camera; extract the duplicated status widget to `lib/widgets/common/status_message.dart`.
 - `lib/widgets/map/app_map_view.dart`, `lib/services/auth_service.dart`, `lib/services/geocoding_service.dart` — correct the inaccurate comments/messages (audit §6.7).
 - `test/features/navigation/providers/navigation_provider_test.dart` — replace `HttpOverrides` + wall-clock wait with a fake routing service.
-- New: `.github/workflows/ci.yml`, `.fvmrc` (or SDK pin documented in `SETUP.md`), `android/local.properties.example` (referenced by SETUP.md but missing).
+- New: `.github/workflows/ci.yml`, `.fvmrc`. (`.env.example` pointed at a missing `android/local.properties.example`; corrected to point at SETUP.md instead of adding the file, since Flutter generates `local.properties`.)
 - `PROJECT_STATUS.md` — clear stale pending items.
 
 **Dependencies.** None new. (CI uses GitHub Actions; FVM is optional tooling, not an app dependency.)
@@ -121,7 +134,9 @@ is measured against a trustworthy baseline.
 
 **Dependencies.** None new in Dart (uses `http`). External: one foot-routing backend — owner chooses (see TECH_STACK §5).
 
-**Steps.** Define `RoutingProvider`; wrap OSRM as driving provider; implement foot provider + parser; pedestrian thresholds in navigation (off-route 25 m, arrival 10–15 m — tune by field test); keep cycling "unsupported" unless the chosen backend supports it.
+**Provider (owner decision).** OpenRouteService `foot-walking` first. Its key would sit in `.env` (extractable from the APK and, unlike the Maps key, not restrictable to the app), so the M3 plan must either accept that with tight quotas or route requests through a small proxy — decide at M3 start. Google Routes `WALK` or a self-hosted engine can be added later as further `RoutingProvider`s.
+
+**Steps.** Define `RoutingProvider`; wrap OSRM as driving provider; implement the OpenRouteService foot provider + parser; pedestrian thresholds in navigation (off-route 25 m, arrival 10–15 m — tune by field test); keep cycling "unsupported" unless the chosen backend supports it.
 
 **Unit tests.** Parser fixtures (recorded responses); provider selection by mode; error mapping.
 
@@ -177,9 +192,9 @@ is measured against a trustworthy baseline.
 
 **Objective.** Earth-anchored AR content and a high-accuracy pose where VPS is available.
 
-**Files.** `ArSessionManager.kt` (Geospatial mode, `checkVpsAvailabilityAsync`, Earth anchors), `lib/ar/models/ar_pose.dart` (EarthState), `LocalizationEngine` (Earth pose as measurement), `capability_manager.dart` (T3 tier), `android/local.properties.example` + manifest meta-data for the ARCore API key.
+**Files.** `ArSessionManager.kt` (Geospatial mode, `checkVpsAvailabilityAsync`, Earth anchors), `lib/ar/models/ar_pose.dart` (EarthState), `LocalizationEngine` (Earth pose as measurement), `capability_manager.dart` (T3 tier), `android/local.properties` entry (documented in SETUP.md) + manifest meta-data for the ARCore API key.
 
-**Dependencies.** ARCore Geospatial API (Google Cloud project with ARCore API enabled; key restricted to the app). No new Dart packages.
+**Dependencies.** ARCore Geospatial API (Google Cloud project with ARCore API enabled; key restricted to the app). No new Dart packages. Check the ARCore API's current pricing/quotas and present the expected cost to the owner before starting (decision 5 spirit: no new paid dependency without its cost).
 
 **Steps.** VPS availability check at session start; localization UX ("point camera at buildings"); thresholds for accepting Earth pose (horizontal and yaw accuracy); terrain/WGS84 anchors for route chevrons; fused pose consumes Earth pose.
 
@@ -197,7 +212,7 @@ is measured against a trustworthy baseline.
 
 **Files.** `android/.../perception/**`; `android/app/build.gradle.kts` (LiteRT); `proguard-rules.pro` (keep rules, verified by release build); `assets/models/` + `LICENSES-models.md`; new `lib/perception/**`; diagnostics "perception" view with boxes overlay; guidance engine hazard cues (off by default until validated).
 
-**Dependencies.** LiteRT runtime (+ GPU delegate). A pretrained detector with a license compatible with the project's distribution plans.
+**Dependencies.** LiteRT runtime (+ GPU delegate, Apache-2.0). A pretrained detector under Apache-2.0 or a similarly permissive licence — no AGPL weights or code unless the owner explicitly approves (decision 3); training/fine-tuning data must also permit commercial use.
 
 **Steps.** InferenceEngine with delegate fallback; CameraX frame source (non-AR) and ARCore frame source (AR); detector + NMS + tracker; rate governor; `HazardRules` in Dart; benchmark mode writing JSON results.
 
@@ -233,9 +248,11 @@ is measured against a trustworthy baseline.
 
 **Objective.** A push-to-talk assistant that can search, route, and describe surroundings using app tools.
 
-**Files.** `supabase/functions/agent-proxy/` (TypeScript Edge Function using the official Anthropic SDK); `supabase/migrations/` (rate-limit table if needed); new `lib/agent/**`; `pubspec.yaml` (`speech_to_text`); AndroidManifest (`RECORD_AUDIO`); assistant screen/sheet.
+**Approach (owner decision).** Free and open-source first, provider-independent. Step 1 is a benchmark, not an integration: candidate open-weight models (on-device and self-hosted), each with its licence checked, scored on a bilingual Tamil/English tool-call eval set for accuracy, latency, size and memory. A deterministic intent fallback ships regardless. A paid hosted LLM is added only if the owner approves its presented cost, and then only via `supabase/functions/agent-proxy/`.
 
-**Dependencies.** `speech_to_text`, `flutter_tts` (M2); Claude API via backend only; Supabase Edge Functions.
+**Files.** New `lib/agent/**` including `llm/llm_provider.dart` and the first open-model provider; `pubspec.yaml` (`speech_to_text`); AndroidManifest (`RECORD_AUDIO`); assistant screen/sheet. Only if a hosted provider is approved: `supabase/functions/agent-proxy/` and a rate-limit migration.
+
+**Dependencies.** `speech_to_text`, `flutter_tts` (M2); an open-weight model runtime chosen by the benchmark (LiteRT or llama.cpp, both permissively licensed); no paid API.
 
 **Steps.** Proxy with auth check, per-user rate limit, server-held key and server-side model config; tool registry on device; conversation state; locale-aware STT/TTS; image tool behind an explicit user action; offline handling.
 

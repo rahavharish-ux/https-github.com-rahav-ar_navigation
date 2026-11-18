@@ -1,6 +1,9 @@
 # Phase 2 — Stage 3: Architecture
 
-_Design proposal for review. Nothing here is implemented yet._
+_Design proposal. Updated 2026-11-18 with the owner's decisions (see
+`PHASE2_GAP_ANALYSIS.md` §0). Of this design, only the routing injection
+seam exists so far (`routingServiceProvider`, added in M0); everything
+else is still to build._
 
 ## 1. Principles
 
@@ -23,8 +26,13 @@ _Design proposal for review. Nothing here is implemented yet._
 6. **Safety-critical guidance is deterministic.** Turn instructions and
    hazard alerts come from rule-based code. The LLM agent may explain or
    rephrase but never originates a safety instruction.
-7. **No secrets on device** beyond restricted client keys. LLM and
-   cloud-vision calls go through a backend proxy.
+7. **No secrets on device** beyond restricted client keys. Any paid or
+   keyed AI call goes through a backend proxy.
+8. **On-device first, provider-independent.** Inference runs on the phone
+   by default; every external service (routing, LLM) sits behind an
+   interface with more than one possible implementation. Models and
+   libraries must carry a commercially permissive licence (no AGPL unless
+   approved).
 
 ## 2. Layer diagram
 
@@ -41,7 +49,7 @@ _Design proposal for review. Nothing here is implemented yet._
 │  testable)     ObservationRepository (geo map)    SpeechIO (STT/TTS)           │
 ├────────────────────────────────────────────────────────────────────────────────┤
 │ Platform       SensorHub  ArSessionBridge  PerceptionBridge  Location(geoloc.) │
-│ bridges        Routing providers (OSRM, foot)  Places  Supabase  AgentClient   │
+│ bridges        Routing providers (OSRM, ORS foot)  Places  Supabase  LlmProvider│
 └──────────────┬──────────────┬──────────────────┬───────────────────────────────┘
                │ EventChannel │ MethodChannel    │ PlatformView (AndroidView)
 ┌──────────────▼──────────────▼──────────────────▼───────── Android (Kotlin) ────┐
@@ -54,8 +62,8 @@ _Design proposal for review. Nothing here is implemented yet._
                                    │ HTTPS
 ┌──────────────────────────────────▼─────────────────── Backend ─────────────────┐
 │ Supabase: Auth · Postgres+PostGIS (observations) · Edge Functions:             │
-│   agent-proxy (LLM with tool use) · vision-proxy (optional cloud landmark)     │
-│ Routing: hosted foot provider (short term) / self-hosted Valhalla|GraphHopper  │
+│   agent-proxy (only if a hosted LLM provider is approved)                      │
+│ Routing: OpenRouteService foot (first) · OSRM driving · others pluggable       │
 └────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -88,7 +96,8 @@ lib/
   ar/                              # NEW
     ar_session_bridge.dart, ar_view.dart, models/ar_pose.dart
   agent/                           # NEW
-    agent_orchestrator.dart, agent_client.dart, tools/*.dart
+    agent_orchestrator.dart, tools/*.dart
+    llm/llm_provider.dart          # interface; implementations per backend
     speech/speech_io.dart
   session/                         # NEW
     navigation_session_controller.dart, capability_manager.dart
@@ -100,7 +109,7 @@ android/app/src/main/kotlin/com/tnarnav/tn_ar_navigation/
   perception/FrameSource.kt, InferenceEngine.kt, Detector.kt, Tracker.kt
 supabase/
   migrations/                      # NEW: additive migrations, schema.sql untouched
-  functions/agent-proxy/
+  functions/agent-proxy/           # only if a hosted/paid LLM provider is approved
 ```
 
 Existing files under `lib/services`, `lib/core/providers`, `lib/features`
@@ -182,6 +191,7 @@ abstract interface class PerceptionBridge {
 class Detection { final String label; final double score; final Rect box; final int? trackId; }
 class Hazard   { final HazardKind kind; final Severity severity; final double? bearingDeg; final int tNanos; }
 ```
+- Models: Apache-2.0 or similarly permissive licences only (decision 3), tracked in `LICENSES-models.md`.
 - Native pipeline: `FrameSource` (ARCore `acquireCameraImage()` or CameraX `ImageAnalysis`, YUV) → resize/rotate → `InferenceEngine.run(modelId)` → NMS → IoU tracker → `Detection` messages.
 - Rate governor: runs at most N Hz and skips frames when the previous inference is still running (no queue growth).
 - `HazardRules` (Dart, pure, testable) turn tracks into advisory hazards (e.g. vehicle track in the lower-centre ROI with box area growing for K frames).
@@ -201,26 +211,47 @@ abstract interface class RoutingProvider {
 }
 class RouteRequest { LatLng origin, destination; TravelMode mode; PedestrianPreferences? prefs; }
 ```
-- `OsrmDrivingProvider` wraps the existing `RoutingService` unchanged.
+- `OsrmDrivingProvider` wraps the existing `RoutingService` unchanged. (M0
+  already routes both notifiers through `routingServiceProvider`, which is
+  where the `RoutePlanner` will plug in.)
+- `OpenRouteServiceFootProvider` is the first walking provider (owner
+  decision); Google Routes `WALK` or a self-hosted engine can be added as
+  further `RoutingProvider` implementations without touching callers.
 - `RoutePlanner` picks the provider per mode, ranks alternatives (time, crossings count, main-road exposure, hazard-layer penalties from §4.8), and explains the choice.
 - `AppRoute` gains optional fields only (`mode`, `provider`, `warnings`) — existing constructor calls keep compiling.
 
-### 4.7 Agent orchestration
+### 4.7 Agent orchestration (provider-independent)
 
 ```
-mic → SpeechIO.listen(locale: ta-IN|en-IN) → transcript
-    → AgentOrchestrator → AgentClient (HTTPS, user JWT) → Supabase Edge Function agent-proxy
-         → Claude Messages API (tool use; optional camera still as image input)
-    ← tool_use requests ← executed ON DEVICE by tool registry:
+mic → SpeechIO.listen(locale: ta-IN|en-IN)  (platform recognizer; offline candidate: whisper.cpp)
+    → transcript → AgentOrchestrator
+    → LlmProvider.complete(messages, tools)   ← interface, no vendor types leak past it
+         implementations (chosen by config, one active at a time):
+           • OnDeviceOpenModelProvider   — open-weight model in LiteRT / llama.cpp (default target)
+           • SelfHostedOpenModelProvider — same model family on our server (if phone is too slow)
+           • HostedApiProvider           — e.g. Claude API, via agent-proxy; only after cost approval
+    ← tool calls ← executed ON DEVICE by the tool registry:
          search_places, plan_route, start_navigation, where_am_i,
-         whats_ahead (perception summary), read_sign (OCR), describe_scene (image)
-    → final text → SpeechIO.speak(locale)
+         whats_ahead (perception summary), read_sign (on-device OCR)
+    → reply text → SpeechIO.speak(locale)  (platform TTS)
 ```
-- The proxy holds the API key, enforces auth, rate limits, and logs nothing personally identifying by default. The client never sees the key.
-- Tool results are summaries (e.g. "3 detections: car 12 m ahead-left"), not raw frames, unless the user explicitly asks to describe the scene — then one downscaled JPEG is sent, with a visible indicator.
-- Model choice is a server-side configuration, not hard-coded in the app (default `claude-opus-5-5`; the owner may choose another for latency/cost after measuring).
-- The Claude API takes text and images, not audio; speech recognition and synthesis stay on the device (Android recognizer / TTS).
-- Offline: agent is unavailable; deterministic voice guidance (GuidanceEngine) keeps working.
+- `LlmProvider` is the only seam the rest of the app sees: a provider-neutral
+  message list, a provider-neutral tool schema, and a result of either text
+  or tool calls. Tool definitions live once, in the app.
+- Decision 5: start with free/open-source components. Candidate open-weight
+  models must be benchmarked for Tamil and English intent/tool-call
+  accuracy, size and latency, and each model's licence checked (some
+  "open" weights ship under custom terms rather than an OSI licence).
+- A deterministic **intent fallback** (keyword/grammar rules for the core
+  commands: navigate to X, where am I, repeat instruction, stop) works with
+  no model at all, so voice control never depends on an LLM being present.
+- If a hosted provider is ever approved, it is called only through a
+  backend proxy holding the key (never on device), with per-user rate
+  limits; its model and budget are server-side configuration.
+- Tool results are summaries, not raw frames. No image leaves the device
+  under the default configuration (decision 4).
+- Offline: on-device provider and intent fallback keep working;
+  deterministic voice guidance (GuidanceEngine) is unaffected.
 
 ### 4.8 Spatial intelligence / environmental mapping
 

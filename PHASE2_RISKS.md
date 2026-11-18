@@ -16,9 +16,12 @@ Likelihood / impact: **L**ow · **M**edium · **H**igh.
 | T8 | Flutter `AndroidView` (hybrid composition) performance with an AR GL surface | M | M | Prototype first in M5 spike; consider texture layer composition modes; keep Flutter overlays minimal on AR screen | Frame time on AR screen vs native-only |
 | T9 | Unmaintained native renderer library | M | M | Evaluate maintenance at M5; isolate behind `ArRenderView` so it can be swapped for raw Filament | Release cadence, open issues |
 | T10 | Platform-channel overhead from high-rate sensor/pose traffic | M | L | Batch samples; ~10 Hz pose to Dart; keep per-frame work native | Channel message rate in profiler |
-| T11 | Flutter SDK drift (observed: 43 deprecations, lockfile rewrite on 3.50) | H | L | Pin SDK in M0; upgrade deliberately in its own change | Analyzer output |
-| T12 | Non-hermetic tests (observed: 2 failures from network timing) | H | M | M0 injection fix; CI forbids real network in unit/widget tests | CI flakiness |
-| T13 | R8/release-only breakage when native ML/AR libs are added (Phase 1 history) | M | M | Release build in every milestone gate; keep rules documented | Release build failure |
+| T11 | Flutter SDK drift (observed: 43 deprecations, lockfile rewrite on 3.50) | L (after M0) | L | **Mitigated in M0:** pinned to 3.38.4 (`.fvmrc`, CI); upgrade only as its own deliberate change | Analyzer output |
+| T12 | Non-hermetic tests (observed: 2 failures from network timing) | L (after M0) | M | **Fixed in M0** with `routingServiceProvider` + `FakeRoutingService`. Some widget tests still set a global `HttpOverrides` defensively; they pass and their routing/search providers are overridden | CI flakiness |
+| T13 | R8/release-only breakage when native ML/AR libs are added (Phase 1 history) | M | M | Release build in every milestone gate (now in CI); keep rules documented | Release build failure |
+| T14 | Open-weight LLMs too weak in Tamil, or too large/slow on mid-range phones | H | M | Benchmark before integrating (M9); rule-based intent fallback for core commands; self-hosted option; hosted API only with approved cost | M9 eval scores |
+| T15 | OpenRouteService free-tier quota or availability limits | M | M | `RoutingProvider` fallback; cache recent routes; Google Routes or self-hosted engine as alternatives | 429/5xx rates in M3 field tests |
+| T16 | M0 not yet verified by an Android build (environment lacked the SDK) | M | M | CI builds debug + release APKs; M1 blocked until green | First CI run |
 
 ## 2. Safety risks
 
@@ -35,7 +38,8 @@ Likelihood / impact: **L**ow · **M**edium · **H**igh.
 |---|---|---|
 | P1 | Camera images leave the device | Default on-device only; any cloud call (agent image, cloud OCR) is user-initiated with visible indicator; documented in privacy policy |
 | P2 | Location traces uploaded | Observations opt-in, coarse metadata only; no raw traces uploaded; trace recording is a developer/diagnostics feature, local only |
-| P3 | Secrets in APK | LLM/Cloud Vision keys server-side only; release APK inspected for keys in M9 gate |
+| P3 | Secrets in APK | Any paid-service key server-side only; release APK inspected for keys at each gate that adds one |
+| P6 | OpenRouteService key in `.env` is extractable and cannot be restricted to the app | Tight quotas and monitoring, or a proxy — decided at M3 start |
 | P4 | Proxy abuse (cost) | Supabase JWT required; per-user rate limits; server-side model and budget config |
 | P5 | Self-declared Android key headers (`X-Android-Package/Cert`) are spoofable | Accept for restricted Places key with quotas, or move Places calls behind the proxy before public launch (already flagged in Phase 1 docs) |
 
@@ -43,7 +47,7 @@ Likelihood / impact: **L**ow · **M**edium · **H**igh.
 
 | # | Risk | Mitigation |
 |---|---|---|
-| X1 | Model weights under AGPL-3.0 (e.g. Ultralytics YOLO) or datasets restricted to non-commercial research (common for driving datasets) | `LICENSES-models.md` registry; owner decision before adoption; prefer Apache-2.0/MIT models and own-collected data |
+| X1 | Model weights under AGPL-3.0 (e.g. Ultralytics YOLO) or datasets restricted to non-commercial research (common for driving datasets); "open" LLM weights under custom, non-OSI terms | **Owner decision: permissive licences only, no AGPL without approval.** `LICENSES-models.md` registry checked at every model adoption; prefer own-collected data |
 | X2 | OSRM public demo server used beyond its usage policy | Move driving routing to a proper provider before public release |
 | X3 | OSM data attribution (ODbL) for self-hosted routing | Attribution in app's about/licenses screen |
 | X4 | Google Maps Platform terms (display of Places data, caching limits) | Don't persist Places content beyond what the terms allow; observation layer stores app-generated data only |
@@ -55,7 +59,7 @@ Likelihood / impact: **L**ow · **M**edium · **H**igh.
 | D1 | No device or ground truth available to validate claims | Field-test protocol from M1; checkpoints surveyed once and reused; claims gated on measurements |
 | D2 | Scope (8 research-heavy targets) exceeds capacity | Milestones are independently valuable; M0–M4 deliver a better pedestrian navigator even if AR/AI milestones slip |
 | D3 | Android SDK unavailable in some build environments (observed here: `dl.google.com` blocked) | CI runner with Android SDK; document build prerequisites |
-| D4 | Cost growth (Places, Geospatial, routing, LLM) | Per-milestone cost estimate; quotas and alerts on every Google Cloud key; server-side LLM budget |
+| D4 | Cost growth (Places, Geospatial, routing, LLM) | Owner rule: no new paid dependency without a presented cost. Per-milestone cost estimate; quotas and alerts on every key |
 
 ## 6. Claims policy
 

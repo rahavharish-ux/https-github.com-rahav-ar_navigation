@@ -1,6 +1,6 @@
 # Project Status
 
-_Last updated: 2026-08-21 (Phase 17)_
+_Last updated: 2026-11-18 (Phase 2, milestone M0 — see PHASE2_ROADMAP.md)_
 
 ## Environment
 
@@ -1693,6 +1693,44 @@ full live verification pass.
       (no Dart test changes this phase; the real work was Android/Gradle
       config plus a Supabase dashboard setting)
 
+### Phase 2, milestone M0 — Stabilize the base (2026-11-18)
+
+Phase 2 planning lives in the six `PHASE2_*.md` documents. M0 makes the
+Phase 1 base trustworthy before any Phase 2 feature work; no feature or
+dependency was added.
+
+- [x] Toolchain pinned to Flutter 3.38.4 (`.fvmrc`, CI). Verified on
+      3.38.4: `flutter analyze` → No issues found; `pubspec.lock` unchanged
+      by `pub get`
+- [x] Fixed the 2 tests that failed outside the original dev machine
+      (`navigation_provider_test.dart`): routing is now injectable through
+      `routingServiceProvider`, and the tests use a controllable
+      `FakeRoutingService` instead of a 1 ms connect timeout plus a 200 ms
+      wall-clock wait
+- [x] Navigation: a reroute that finishes after Stop no longer resurrects
+      the session; a reroute from a previous session can't overwrite a new
+      one; no state write after the provider is disposed
+- [x] Navigation: remaining distance/ETA now include the distance still to
+      travel to the next maneuver (previously 0 m for the whole final leg)
+- [x] Search: a slow, older response can no longer overwrite newer
+      results or reappear after the query is cleared
+- [x] Camera: released when the app leaves the foreground and re-opened
+      on return (preview and vision screens); a camera that finishes
+      initializing after Stop/dispose is released instead of published
+- [x] Shared `StatusMessage` widget replaces two identical private copies;
+      inaccurate comments/messages corrected
+- [x] GitHub Actions CI added (format, analyze, test + coverage, debug and
+      release APK) — **not yet run**: the branch could not be pushed from
+      the Phase 2 session
+- [x] Every confirmed defect got a regression test written first and seen
+      failing on the unfixed code. Results: **251/251 tests pass** (3
+      consecutive full runs), line coverage 74.6% (1523/2042)
+- [ ] Android debug/release build **not run** for M0: no Android SDK in
+      the Phase 2 session environment (download host blocked). Runs in CI
+      once pushed
+- [ ] Device checks for M0 not yet done (camera background/resume; stop
+      during a forced reroute)
+
 ## Pending Tasks (by upcoming phase)
 
 - [ ] Post-Phase-17: add the release SHA-1
@@ -1743,12 +1781,8 @@ full live verification pass.
       model with real road-scene data — no way to validate on this dev
       machine); both deliberately deferred, not attempted this round —
       see this phase's entry above and KNOWN_LIMITATIONS.md
-- [ ] Phase 14: Supabase (`supabase_flutter`), `.env` configuration
-      (`flutter_dotenv`), auth, saved places / history / preferences tables
 - [ ] iOS build verification on macOS/Xcode (scaffolded, untested on this
       Windows machine)
-- [ ] First Git commit (repository initialized, files staged; commit not
-      yet created — pending explicit request)
 
 See `DEVELOPMENT.md` for the full module list and development workflow,
 and `ARCHITECTURE.md` for the target architecture and provider interfaces.

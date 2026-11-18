@@ -2,6 +2,10 @@
 
 _Audit date: 2026-11-18 · Branch: `claude/phase-2-technical-audit-2di7x1` · Base commit: `eb397c5`_
 
+> **Status update — M0 complete except builds and device checks
+> (2026-11-18).** The defects in §6 have been fixed; see §10. Sections
+> 1–9 are kept as the original audit record.
+
 This is a read-only audit. **No application code was changed.** Everything
 below was either observed by running a tool (marked **[observed]**) or
 found by reading the code (marked **[inspection]**). Inspection findings are
@@ -260,3 +264,36 @@ Gaps that matter for Phase 2:
 - No Android build was performed in this session, so release-build health is taken from `PROJECT_STATUS.md` (Phase 16/17 entries), not re-verified.
 - No device behaviour was observed. Inspection-only defects (§6.3–6.6) are hypotheses to confirm with tests.
 - Library capability statements in the other Phase 2 documents describe what each library is documented to offer; each must be verified on the target device during its milestone before being presented as working.
+
+---
+
+## 10. M0 follow-up (2026-11-18)
+
+Toolchain: Flutter **3.38.4** / Dart 3.10.3 (now pinned via `.fvmrc` and
+CI). On 3.38.4 the baseline was `flutter analyze` → No issues found and
+222 passed / 2 failed — the same two failures as on 3.50, confirming they
+were not caused by SDK drift.
+
+| Audit item | Outcome | Evidence |
+|---|---|---|
+| §6.1 two failing navigation tests | **Fixed** — `routingServiceProvider` + `FakeRoutingService`; no network, no wall-clock waits | 25/25 navigation provider tests, 3 consecutive runs |
+| §6.2 state write after dispose | **Fixed** — `ref.mounted` + session-generation check after the `await` | Regression test failed on old code ("Cannot use the Ref … after it has been disposed"), passes now |
+| §6.3 stop during reroute resurrects session | **Confirmed and fixed** | Regression tests failed on old code (status `navigating` / `offRoute` after Stop; old session's reroute overwrote a new session) |
+| §6.4 remaining distance too low | **Confirmed and fixed** — cause: OSRM step *i* spans maneuver *i*→*i+1*, so summing steps from the next maneuver omitted the distance still to reach it | Old code: 555.0 m vs expected 610.6 m; **0.0 m** for the whole ≈556 m final leg |
+| §6.5 search stale-response race | **Confirmed and fixed** — query generation counter + `ref.mounted` | Old code: later "Madurai" response replaced "Chennai"; results reappeared after clearing; dispose threw |
+| §6.6 camera lifecycle | **Fixed** — release on any non-resumed state, re-open on `resumed` only if released by lifecycle; doesn't cancel a start interrupted by the permission dialog. Also fixed (test-first): a camera finishing initialization after Stop/dispose was published instead of released | 13 camera provider tests + 2 screen wiring tests |
+| §6.7 doc drift | **Fixed** (`app_map_view.dart`, `geocoding_service.dart`, `auth_service.dart`, `.env.example`, `PROJECT_STATUS.md` pending list) | — |
+| §6.8 SDK drift | **Pinned** to 3.38.4 | `pub get` leaves `pubspec.lock` unchanged |
+| Duplicated status widget | **Extracted** to `lib/widgets/common/status_message.dart` | Existing screen tests unchanged and passing |
+| No CI | **Added** `.github/workflows/ci.yml` | Not yet run (branch not pushed) |
+
+**Results:** `flutter analyze` → No issues found · `flutter test` →
+**251 passed, 0 failed** (3 consecutive full runs; 224 original tests, 2 of
+them rewritten, + 27 new) · line coverage **74.6%** (1523/2042; was 73.7%).
+
+**Not done in M0:** Android debug/release builds (no Android SDK in this
+environment — `dl.google.com` is refused by its network policy) and the
+device checklist. New finding during M0, by inspection only: pausing during
+an in-flight reroute is undone when the reroute completes (tracked in
+`KNOWN_LIMITATIONS.md`).
+
