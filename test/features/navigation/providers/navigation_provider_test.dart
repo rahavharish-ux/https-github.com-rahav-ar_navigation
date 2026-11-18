@@ -409,6 +409,127 @@ void main() {
     expect(finalState.remainingDistanceMeters, 0);
   });
 
+  group('pause/resume while a recalculation is in flight (M0 closure '
+      'regression)', () {
+    void pause() => container.read(navigationProvider.notifier).pause();
+    void resume() => container.read(navigationProvider.notifier).resume();
+
+    test('a reroute that succeeds while paused adopts the new route but '
+        'stays paused', () async {
+      startAndGoOffRoute();
+      pause();
+      routing.lastRequest.succeed(reroute);
+      await settle();
+
+      final state = container.read(navigationProvider);
+      expect(state.status, NavigationStatus.paused);
+      expect(state.route, same(reroute));
+      expect(routing.requests, hasLength(1));
+    });
+
+    test('a reroute that fails while paused stays paused', () async {
+      startAndGoOffRoute();
+      pause();
+      routing.lastRequest.fail();
+      await settle();
+
+      expect(
+        container.read(navigationProvider).status,
+        NavigationStatus.paused,
+      );
+      expect(routing.requests, hasLength(1));
+    });
+
+    test('resuming before the reroute finishes waits for it -- no second, '
+        'parallel reroute against the old route', () async {
+      startAndGoOffRoute();
+      pause();
+      resume();
+
+      expect(
+        container.read(navigationProvider).status,
+        NavigationStatus.recalculating,
+      );
+      expect(routing.requests, hasLength(1));
+
+      routing.lastRequest.succeed(reroute);
+      await settle();
+
+      final state = container.read(navigationProvider);
+      expect(state.route, same(reroute));
+      expect(state.status, isNot(NavigationStatus.paused));
+      expect(state.status, isNot(NavigationStatus.recalculating));
+      expect(routing.requests, hasLength(1));
+    });
+
+    test('resuming after a reroute completed while paused continues on the '
+        'new route', () async {
+      startAndGoOffRoute();
+      pause();
+      routing.lastRequest.succeed(reroute);
+      await settle();
+      resume();
+
+      final state = container.read(navigationProvider);
+      expect(state.route, same(reroute));
+      expect(state.status, isNot(NavigationStatus.paused));
+      expect(state.status, isNot(NavigationStatus.offRoute));
+      expect(routing.requests, hasLength(1));
+    });
+
+    test('stop() while paused during a reroute stays idle when the reroute '
+        'completes', () async {
+      startAndGoOffRoute();
+      pause();
+      container.read(navigationProvider.notifier).stop();
+      routing.lastRequest.succeed(reroute);
+      await settle();
+
+      expect(container.read(navigationProvider).status, NavigationStatus.idle);
+    });
+  });
+
+  group('latest position is used when async work or a pause ends (M0 '
+      'closure regression)', () {
+    test('a completed reroute measures progress from the newest GPS fix, '
+        'not the position at request time', () async {
+      startAndGoOffRoute(); // request made at (11.005, 78.005)
+      // The user keeps moving while the request is in flight.
+      const newest = LatLng(11.0075, 78.0025); // on the rerouted line
+      fakeLocation.emit(
+        LocationAvailable(_fixAt(newest.latitude, newest.longitude)),
+      );
+
+      routing.lastRequest.succeed(reroute);
+      await settle();
+
+      final state = container.read(navigationProvider);
+      expect(state.currentLocation, newest);
+      expect(
+        state.remainingDistanceMeters,
+        closeTo(haversineMeters(newest, destination), 0.01),
+      );
+    });
+
+    test('resume() recomputes from the newest GPS fix, including one that '
+        'arrived while paused', () {
+      container
+          .read(navigationProvider.notifier)
+          .start(route: route, destination: destination);
+      fakeLocation.emit(LocationAvailable(_fixAt(11.001, 78.000)));
+      container.read(navigationProvider.notifier).pause();
+
+      // Moved while paused; if the user now stands still the GPS distance
+      // filter sends no further fix, so resume() must use this one.
+      fakeLocation.emit(LocationAvailable(_fixAt(11.0045, 78.000)));
+      container.read(navigationProvider.notifier).resume();
+
+      final state = container.read(navigationProvider);
+      expect(state.currentLocation, const LatLng(11.0045, 78.000));
+      expect(state.status, NavigationStatus.approachingTurn);
+    });
+  });
+
   group('remaining distance and ETA (M0 regression)', () {
     // OSRM step i's `distance` runs from maneuver i to maneuver i+1. With
     // the next maneuver at index k, the user is still on step k-1, so the

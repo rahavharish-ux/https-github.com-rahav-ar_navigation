@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/constants/app_strings.dart';
 import '../../core/providers/camera_provider.dart';
 import '../../core/providers/vision_provider.dart';
+import '../../core/utils/camera_capture.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../widgets/buttons/app_button.dart';
 import '../../widgets/common/camera_lifecycle_binding.dart';
@@ -43,9 +44,9 @@ class _VisionScreenState extends ConsumerState<VisionScreen>
   ) async {
     final cameraState = ref.read(cameraProvider);
     if (cameraState is! CameraAvailable) return;
-    final photo = await cameraState.controller.takePicture();
-    if (!mounted) return;
-    await analyze(photo.path);
+    final path = await captureStillImagePath(cameraState.controller);
+    if (path == null || !mounted) return;
+    await analyze(path);
   }
 
   @override

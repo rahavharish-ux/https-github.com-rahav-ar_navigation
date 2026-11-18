@@ -74,6 +74,11 @@ class CameraNotifier extends Notifier<CameraState> {
   /// foreground, so `resumed` knows to re-open it.
   bool _releasedForLifecycle = false;
 
+  /// True between a `hidden`/`paused`/`detached` lifecycle event and the
+  /// next `resumed`. Not set by `inactive` alone, which the camera
+  /// permission dialog also triggers while the app stays visible.
+  bool _appInBackground = false;
+
   @override
   CameraState build() {
     _service = createService();
@@ -108,6 +113,15 @@ class CameraNotifier extends Notifier<CameraState> {
         controller.dispose();
         return;
       }
+      if (_appInBackground) {
+        // Finished initializing after the app went to the background, so
+        // there was no open camera to release at the time. Release it now
+        // and let `resumed` re-open it (M0 closure).
+        controller.dispose();
+        _releasedForLifecycle = true;
+        state = const CameraInitial();
+        return;
+      }
       _controller = controller;
       state = CameraAvailable(controller);
     } on CameraException catch (error) {
@@ -132,6 +146,16 @@ class CameraNotifier extends Notifier<CameraState> {
   /// `CameraLifecycleBinding`). Releases the camera when the app leaves the
   /// foreground and re-opens it on return — see [cameraLifecycleActionFor].
   void handleAppLifecycleState(AppLifecycleState lifecycleState) {
+    switch (lifecycleState) {
+      case AppLifecycleState.hidden ||
+          AppLifecycleState.paused ||
+          AppLifecycleState.detached:
+        _appInBackground = true;
+      case AppLifecycleState.resumed:
+        _appInBackground = false;
+      case AppLifecycleState.inactive:
+        break;
+    }
     switch (cameraLifecycleActionFor(
       lifecycleState,
       hasOpenCamera: _controller != null,

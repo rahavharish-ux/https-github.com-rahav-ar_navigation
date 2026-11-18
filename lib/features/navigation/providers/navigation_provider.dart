@@ -169,6 +169,13 @@ class NavigationNotifier extends Notifier<NavigationState> {
   /// or overwrite a newer session's route (Phase 2 M0 regression tests).
   int _sessionGeneration = 0;
 
+  /// True while this session's recalculation request is in flight. Tracked
+  /// separately from [NavigationState.status] because the user can pause
+  /// (and resume) while it runs, which changes the status but not the fact
+  /// that a request is outstanding. Prevents a resume from starting a
+  /// second, parallel reroute against the stale route (M0 closure).
+  bool _rerouteInFlight = false;
+
   @override
   NavigationState build() {
     // Owned (and disposed) by routingServiceProvider, not by this notifier.
@@ -185,6 +192,7 @@ class NavigationNotifier extends Notifier<NavigationState> {
 
   void start({required AppRoute route, required LatLng destination}) {
     _sessionGeneration++;
+    _rerouteInFlight = false;
     _wrongDirectionStreak = 0;
     state = NavigationState(
       status: NavigationStatus.navigating,
@@ -213,16 +221,35 @@ class NavigationNotifier extends Notifier<NavigationState> {
 
   void resume() {
     if (state.status != NavigationStatus.paused) return;
-    state = state.copyWith(status: NavigationStatus.navigating);
-    if (state.currentLocation != null) {
-      _onLocationUpdate(state.currentLocation!);
+    _wrongDirectionStreak = 0;
+    if (_rerouteInFlight) {
+      // The current route is stale and a replacement is on its way; show
+      // that, and let the pending reroute finish the job.
+      state = state.copyWith(status: NavigationStatus.recalculating);
+      return;
     }
+    state = state.copyWith(status: NavigationStatus.navigating);
+    final latest = _latestLocation();
+    if (latest != null) _onLocationUpdate(latest);
   }
 
   void stop() {
     _sessionGeneration++;
+    _rerouteInFlight = false;
     _wrongDirectionStreak = 0;
     state = const NavigationState();
+  }
+
+  /// The newest known position: the latest accepted GPS fix if there is
+  /// one, else the last position this session processed. GPS fixes that
+  /// arrive while paused are not applied to the session, so after a pause
+  /// (or a reroute) this is fresher than [NavigationState.currentLocation].
+  LatLng? _latestLocation() {
+    final location = ref.read(locationProvider);
+    if (location is LocationAvailable) {
+      return location.smoothedLocation.toLatLng();
+    }
+    return state.currentLocation;
   }
 
   void _onLocationUpdate(LatLng current) {
@@ -237,8 +264,9 @@ class NavigationNotifier extends Notifier<NavigationState> {
 
     // A recalculation fetch is in flight against the (now stale) route
     // above — don't recompute maneuver/status from it, that would race
-    // with `_recalculate()`'s own state updates once it resolves.
-    if (state.status == NavigationStatus.recalculating) return;
+    // with `_recalculate()`'s own state updates once it resolves. The
+    // position recorded just above is what the reroute will continue from.
+    if (_rerouteInFlight) return;
 
     final onRouteDistance = distanceToPolylineMeters(current, route.polyline);
     if (onRouteDistance != null && onRouteDistance > offRouteThresholdMeters) {
@@ -354,12 +382,19 @@ class NavigationNotifier extends Notifier<NavigationState> {
         wrongDirectionThresholdDegrees;
   }
 
+  /// Fetches a new route from the current position.
+  ///
+  /// When it completes, the result respects whatever the user did in the
+  /// meantime (M0 closure): stopped or replaced session → ignored; paused
+  /// → new route adopted but the session stays paused; otherwise progress
+  /// is recomputed from the newest GPS fix, not the request-time position.
   Future<void> _recalculate() async {
     final current = state.currentLocation;
     final destination = state.destination;
-    if (current == null || destination == null) return;
+    if (current == null || destination == null || _rerouteInFlight) return;
 
     final generation = _sessionGeneration;
+    _rerouteInFlight = true;
     state = state.copyWith(status: NavigationStatus.recalculating);
 
     // True when this provider was disposed, or the session that requested
@@ -373,25 +408,31 @@ class NavigationNotifier extends Notifier<NavigationState> {
         destination: destination,
       );
       if (isStale()) return;
+      _rerouteInFlight = false;
+      final paused = state.status == NavigationStatus.paused;
       state = state.copyWith(
         route: route,
         instructionIndex: _initialInstructionIndex(route.instructions),
-        status: NavigationStatus.navigating,
+        status: paused ? NavigationStatus.paused : NavigationStatus.navigating,
         clearError: true,
       );
-      _onLocationUpdate(current);
-    } on RoutingException catch (error) {
-      if (isStale()) return;
-      state = state.copyWith(
-        status: NavigationStatus.offRoute,
-        errorMessage: error.message,
-      );
+      // While paused, progress is recomputed by resume() instead.
+      if (!paused) _onLocationUpdate(_latestLocation() ?? current);
     } catch (error) {
       if (isStale()) return;
-      state = state.copyWith(
-        status: NavigationStatus.offRoute,
-        errorMessage: error.toString(),
-      );
+      _rerouteInFlight = false;
+      _onRerouteFailed(error is RoutingException ? error.message : '$error');
     }
+  }
+
+  /// A failed reroute leaves the session off-route (the next GPS update
+  /// retries), except when the user paused meanwhile: then it stays paused
+  /// and the retry happens after resume().
+  void _onRerouteFailed(String message) {
+    final paused = state.status == NavigationStatus.paused;
+    state = state.copyWith(
+      status: paused ? NavigationStatus.paused : NavigationStatus.offRoute,
+      errorMessage: message,
+    );
   }
 }

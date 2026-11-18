@@ -221,6 +221,37 @@ void main() {
     });
   });
 
+  group('backgrounded while the camera is still starting (M0 closure '
+      'regression)', () {
+    test('a camera that finishes initializing while the app is in the '
+        'background is released, then re-opened on resume', () async {
+      service.initGate = Completer<void>();
+      final starting = notifier().start();
+      await Future<void>.delayed(Duration.zero); // now inside initialize
+
+      // Real backgrounding (not just the permission dialog's `inactive`).
+      notifier()
+        ..handleAppLifecycleState(AppLifecycleState.inactive)
+        ..handleAppLifecycleState(AppLifecycleState.hidden)
+        ..handleAppLifecycleState(AppLifecycleState.paused);
+      service.initGate!.complete();
+      await starting;
+
+      expect(service.controllers.single.disposeCalls, 1);
+      expect(container.read(cameraProvider), isA<CameraInitial>());
+
+      service.initGate = null;
+      notifier()
+        ..handleAppLifecycleState(AppLifecycleState.hidden)
+        ..handleAppLifecycleState(AppLifecycleState.inactive)
+        ..handleAppLifecycleState(AppLifecycleState.resumed);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(service.controllers, hasLength(2));
+      expect(container.read(cameraProvider), isA<CameraAvailable>());
+    });
+  });
+
   group('cameraLifecycleActionFor', () {
     test('releases an open camera in every non-resumed state', () {
       for (final state in [
