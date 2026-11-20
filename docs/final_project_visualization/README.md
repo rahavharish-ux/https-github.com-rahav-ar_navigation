@@ -22,6 +22,11 @@ complete — and, on every image, exactly which parts exist today.
 
 ## Contents
 
+### `TN_AR_NAV_Final_Project_Visualization.pdf`
+All twelve images in one landscape-A4 presentation (13 pages): cover with
+status legend and contents, the showcase, screens 01–09, the user journey
+and the system architecture. Regenerate with `python3 source/make_pdf.py`.
+
 ### `screens/` — individual screen concepts (3200–3920 px wide)
 | File | Screen | Mostly |
 |---|---|---|
